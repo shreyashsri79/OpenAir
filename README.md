@@ -1,5 +1,8 @@
 
-# OpenAir 🌬️
+# OpenAir 
+<p align="center">
+  <img src="./logo.png" alt="OpenAir Logo" width="500" />
+</p>
 
 **AirDrop-like serverless file sharing from Android to any OS (Linux / macOS / Windows)**
 
