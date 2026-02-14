@@ -1,0 +1,9 @@
+Hello from OpenAir!
+
+This is a test file to demonstrate the file transfer protocol.
+
+The sender will calculate the SHA-256 hash of this file,
+send the metadata to the receiver, wait for acceptance,
+and then transfer the complete file contents.
+
+End of test file.
