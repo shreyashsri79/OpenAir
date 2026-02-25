@@ -1,4 +1,4 @@
-module github.com/shreyashsri79/openair-receiver
+module github.com/shreyashsri79/openair-sender
 
 go 1.25.6
 

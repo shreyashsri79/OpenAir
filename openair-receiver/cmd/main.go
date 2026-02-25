@@ -21,6 +21,12 @@ func main() {
 	fmt.Println("\033[32mListening on port :"+strconv.Itoa(constants.PORT)+"\033[0m")
 	defer ln.Close()
 
+	mdns,err := startMDNS("Zoro Fedora",constants.PORT)
+	if err != nil {
+		errorhandler.FatalRed("mdns error", err)
+	}
+	defer mdns.Shutdown()
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {

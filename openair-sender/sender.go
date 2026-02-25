@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,141 +12,110 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-)
+	"time"
 
-const (
-	ReceiverAddr = "localhost:8080"
+	"github.com/grandcat/zeroconf"
 )
 
 type FileMeta struct {
 	Name   string `json:"name"`
-	Size   int64  `json:"sizw"`
-	SHA256 string `json:"sha26"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+func discoverAndroid() (string, int, error) {
+	fmt.Println("🔍 Scanning for OpenAir Android device...")
+	resolver, err := zeroconf.NewResolver(nil)
+	if err != nil {
+		return "", 0, err
+	}
+
+	entries := make(chan *zeroconf.ServiceEntry)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go func() {
+		err = resolver.Browse(ctx, "_openair._tcp", "local.", entries)
+		if err != nil {
+			fmt.Println("Browse failed:", err)
+		}
+	}()
+
+	select {
+	case entry := <-entries:
+		// Prefer IPv4
+		addr := entry.AddrIPv4[0].String()
+		fmt.Printf("✅ Found: %s at %s:%d\n", entry.Instance, addr, entry.Port)
+		return addr, entry.Port, nil
+	case <-ctx.Done():
+		return "", 0, fmt.Errorf("discovery timed out")
+	}
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run sender.go <file.txt>")
+		fmt.Println("Usage: go run sender.go <file_path>")
 		os.Exit(1)
 	}
 
 	filePath := os.Args[1]
 
-	// 1) Open and validate the file
+	// 1. Discover the phone via mDNS
+	host, port, err := discoverAndroid()
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		os.Exit(1)
+	}
+	targetAddr := fmt.Sprintf("%s:%d", host, port)
+
+	// 2. Prepare File Data
 	file, err := os.Open(filePath)
 	if err != nil {
-		fmt.Println("Failed to open file:", err)
+		fmt.Printf("Failed to open file: %v\n", err)
 		os.Exit(1)
 	}
 	defer file.Close()
 
-	fileInfo, err := file.Stat()
-	if err != nil {
-		fmt.Println("Failed to stat file:", err)
-		os.Exit(1)
-	}
-
-	// 2) Calculate SHA-256 hash
-	fmt.Println("Calculating file hash...")
+	fileInfo, _ := file.Stat()
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		fmt.Println("Failed to hash file:", err)
-		os.Exit(1)
-	}
+	io.Copy(hasher, file)
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
+	file.Seek(0, 0) // Reset for actual transfer
 
-	// Reset file pointer to beginning
-	if _, err := file.Seek(0, 0); err != nil {
-		fmt.Println("Failed to reset file pointer:", err)
-		os.Exit(1)
-	}
-
-	// 3) Prepare metadata
 	meta := FileMeta{
 		Name:   filepath.Base(filePath),
 		Size:   fileInfo.Size(),
 		SHA256: fileHash,
 	}
 
-	fmt.Printf("\nPreparing to send:\n")
-	fmt.Printf("  File: %s\n", meta.Name)
-	fmt.Printf("  Size: %s\n", formatBytes(meta.Size))
-	fmt.Printf("  Hash: %s\n", meta.SHA256)
-	fmt.Printf("  To:   %s\n", ReceiverAddr)
-
-	// 4) Connect to receiver
-	fmt.Println("\nConnecting to receiver...")
-	conn, err := net.Dial("tcp", ReceiverAddr)
+	// 3. Connect and Transfer
+	fmt.Printf("🚀 Connecting to %s...\n", targetAddr)
+	conn, err := net.DialTimeout("tcp", targetAddr, 5*time.Second)
 	if err != nil {
-		fmt.Println("Failed to connect:", err)
+		fmt.Printf("Connection failed: %v\n", err)
 		os.Exit(1)
 	}
 	defer conn.Close()
 
-	fmt.Println("Connected!")
+	// Send JSON Header
+	header, _ := json.Marshal(meta)
+	fmt.Printf("📤 Sending Metadata: %s\n", string(header))
+	conn.Write(append(header, '\n'))
 
-	// 5) Send JSON header
-	headerJSON, err := json.Marshal(meta)
-	if err != nil {
-		fmt.Println("Failed to marshal metadata:", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("\nSending JSON header: %s\n", string(headerJSON))
-
-	headerWithNewline := append(headerJSON, '\n')
-	if _, err := conn.Write(headerWithNewline); err != nil {
-		fmt.Println("Failed to send header:", err)
-		os.Exit(1)
-	}
-
-	// 6) Wait for ACCEPT or REJECT
+	// Wait for Android's "ACCEPT"
 	reader := bufio.NewReader(conn)
 	response, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Println("Failed to read response:", err)
+	if err != nil || !strings.Contains(strings.ToUpper(response), "ACCEPT") {
+		fmt.Printf("❌ Receiver rejected or error: %v (Response: %s)\n", err, response)
 		os.Exit(1)
 	}
 
-	response = strings.TrimSpace(response)
-	if response != "ACCEPT" {
-		fmt.Println("Receiver rejected the file:", response)
-		os.Exit(1)
-	}
-
-	fmt.Println("Receiver accepted. Sending file...")
-
-	// 7) Send file data
+	// Stream the file
+	fmt.Printf("📦 Sending %s (%d bytes)...\n", meta.Name, meta.Size)
 	sent, err := io.Copy(conn, file)
 	if err != nil {
-		fmt.Println("Failed to send file:", err)
-		os.Exit(1)
+		fmt.Printf("\n❌ Transfer interrupted: %v\n", err)
 	}
 
-	if sent != meta.Size {
-		fmt.Printf("Warning: sent %d bytes, expected %d\n", sent, meta.Size)
-	}
-
-	fmt.Println("\nTransfer complete!")
-	fmt.Printf("Sent %s successfully.\n", file)
-}
-
-
-func formatBytes(n int64) string {
-	const (
-		KB = 1024
-		MB = 1024 * KB
-		GB = 1024 * MB
-	)
-
-	switch {
-	case n >= GB:
-		return fmt.Sprintf("%.2f GB", float64(n)/float64(GB))
-	case n >= MB:
-		return fmt.Sprintf("%.2f MB", float64(n)/float64(MB))
-	case n >= KB:
-		return fmt.Sprintf("%.2f KB", float64(n)/float64(KB))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
+	fmt.Printf("\n✅ Success! Sent %d bytes.\n", sent)
 }

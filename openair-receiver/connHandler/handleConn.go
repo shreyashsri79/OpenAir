@@ -44,7 +44,7 @@ func HandleConn(conn net.Conn) {
 	}
 
 	fmt.Println("file name :" + meta.Name)
-	fmt.Println("file size :" + strconv.FormatInt(meta.Size,10))
+	fmt.Println("file size :" + strconv.FormatInt(meta.Size, 10))
 	fmt.Println("file sha :" + meta.SHA256)
 
 	file.ValidateAndSanitizeFile(&meta)

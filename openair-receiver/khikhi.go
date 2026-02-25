@@ -231,16 +231,7 @@ func uniquePath(path string) string {
 		}
 	}
 
-	// Worst case fallback
-	return filepath.Join(dir, fmt.Sprintf("%s (%d)%s", name, time.Now().Unix(), ext))
-}
-
-func getDownloadsDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, "Downloads"), nil
+	// Worst case bb"Downloads"), nil
 }
 
 func formatBytes(n int64) string {
