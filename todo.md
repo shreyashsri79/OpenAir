@@ -1,2 +1,23 @@
-receiver for android side is to be worked on, 
-as it is crashing on being sent a file and file is not visible in gallery 
+PLAN:
+    Android Core
+    Desktop Client
+    Android Client
+
+BUILD:
+    Parallel Streaming
+    Chunking
+
+TEST:
+
+
+DONE:
+
+
+
+
+---------------------------------------------------------------------------
+
+NOTES:
+i have to make the receiver so that it sends two response 
+    1- immideatly after recieving so to calculate rtt
+    2- accept/deny
