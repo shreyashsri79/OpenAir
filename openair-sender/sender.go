@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,11 +15,24 @@ import (
 	"github.com/shreyashsri79/openair-sender/internal/models"
 )
 
+const (
+	ansiReset = "\x1b[0m"
+	ansiGreen = "\x1b[32m"
+	ansiRed   = "\x1b[31m"
+)
+
+func greenf(format string, a ...any) string {
+	return ansiGreen + fmt.Sprintf(format, a...) + ansiReset
+}
+
+func redf(format string, a ...any) string {
+	return ansiRed + fmt.Sprintf(format, a...) + ansiReset
+}
+
 type Meta struct {
 	Name      string `json:"name"`
 	Size      int64  `json:"size"`
-	Timestamp int64
-	Data      []byte //to calc rtt
+	Timestamp int64  `json:"timestamp"`
 }
 
 type ReceiverMeta struct {
@@ -30,133 +42,121 @@ type ReceiverMeta struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run sender.go <file_path>")
+		fmt.Println(redf("Usage: go run sender.go <file_path>"))
 		os.Exit(1)
 	}
 
 	filePath := os.Args[1]
 
-	// 1. Discover the phone via mDNS
+	// Discover receiver
 	host, port, err := discovery.DiscoverAndroid()
 	if err != nil {
-		fmt.Printf("❌ Error: %v\n", err)
+		fmt.Println(redf("Discovery error: %v", err))
 		os.Exit(1)
 	}
 	targetAddr := fmt.Sprintf("%s:%d", host, port)
 
-	// 2. Prepare File Data
+	// Open file
 	file, err := os.Open(filePath)
 	if err != nil {
-		fmt.Printf("Failed to open file: %v\n", err)
+		fmt.Println(redf("File open error: %v", err))
 		os.Exit(1)
 	}
 	defer file.Close()
 
 	fileInfo, _ := file.Stat()
-	// hasher := sha256.New()
-	// io.Copy(hasher, file)
-	// fileHash := hex.EncodeToString(hasher.Sum(nil))
-	// file.Seek(0, 0) // Reset for actual transfer
 
-	start := time.Now()
-
+	// Prepare metadata
 	meta := Meta{
-		Timestamp: start.Unix(),
 		Name:      filepath.Base(filePath),
 		Size:      fileInfo.Size(),
-		Data:      make([]byte, 1*1024*1024),
+		Timestamp: time.Now().Unix(),
 	}
 
-	// 3. Connect and Transfer
-	fmt.Printf(" Connecting to %s...\n", targetAddr)
+	// Control connection (ONLY for handshake)
 	conn, err := net.DialTimeout("tcp", targetAddr, 5*time.Second)
 	if err != nil {
-		fmt.Printf("Connection failed: %v\n", err)
+		fmt.Println(redf("Connection failed: %v", err))
 		os.Exit(1)
 	}
 	defer conn.Close()
 
-	// Send JSON Header
+	fmt.Println(greenf("Connected to receiver"))
+
+	// Send metadata
 	header, _ := json.Marshal(meta)
-	fmt.Printf(" Sending Metadata: %s\n", string(header))
 	conn.Write(append(header, '\n'))
 
-	// Wait for Android's "ACCEPT" and meta response
 	reader := bufio.NewReader(conn)
+
+	// Wait for ACCEPT
 	response, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Printf(" Receiver error: %v\n", err)
+	if err != nil || !strings.Contains(strings.ToUpper(response), "ACCEPT") {
+		fmt.Println(redf("Receiver rejected: %v", response))
 		os.Exit(1)
 	}
 
-	// Check for ACCEPT and extract meta JSON if present
+	// Receive receiver meta (RTT + bandwidth probe)
+	metaLine, _ := reader.ReadString('\n')
+	metaLine = strings.TrimSpace(metaLine)
 
 	var recvMeta ReceiverMeta
+	json.Unmarshal([]byte(metaLine), &recvMeta)
 
-	if !strings.Contains(strings.ToUpper(response), "ACCEPT") {
-		fmt.Printf(" Receiver rejected: %s\n", response)
-		os.Exit(1)
-	}
-
-	// Get the next line which should be meta data
-	metaLine, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Printf(" Error reading receiver meta: %v\n", err)
-		os.Exit(1)
-	}
-	metaLine = strings.TrimSpace(metaLine)
-	if err := json.Unmarshal([]byte(metaLine), &recvMeta); err != nil {
-		fmt.Printf(" Failed to parse receiver meta: %v\n", err)
-		os.Exit(1)
-	}
-
-	// RTT calculation: time now - receiver timestamp (assume epoch ms/sec consistency)
-	rttMillis := (time.Now().UnixMilli()) - (recvMeta.Timestamp * 1000)
+	// RTT calculation
+	rttMillis := time.Now().UnixMilli() - (recvMeta.Timestamp * 1000)
 	rttSecs := float64(rttMillis) / 1000.0
-	fmt.Printf(" Estimated RTT: %.2f ms\n", float64(rttMillis))
 
-	// Bandwidth calculation if recvMeta.Data supports it (for example, number of bytes acknowledged)
-	// Here, Data could be string bytes, e.g. "ACK:1048576"
+	fmt.Println(greenf("RTT: %.2f ms", float64(rttMillis)))
+
+	// Bandwidth estimation
 	var bandwidth float64
 	if strings.HasPrefix(recvMeta.Data, "ACK:") {
-		countStr := strings.TrimPrefix(recvMeta.Data, "ACK:")
 		var byteCount int64
-		fmt.Sscanf(countStr, "%d", &byteCount)
+		fmt.Sscanf(strings.TrimPrefix(recvMeta.Data, "ACK:"), "%d", &byteCount)
+
 		if rttSecs > 0 {
-			bandwidth = float64(byteCount) / rttSecs // bytes/sec
-			fmt.Printf(" Estimated Bandwidth: %.2f KB/s\n", bandwidth/1024)
+			bandwidth = float64(byteCount) / rttSecs
 		}
 	}
 
-	// Chunk the file
-	worker := make(chan []byte, 1000)
-	chunks := internal.Chunker(*file, models.Network{
-		Bandwidth: bandwidth,
-		RTT:       rttSecs,
-	}, 10, 1024*1024, worker)
+	fmt.Println(greenf("Estimated Bandwidth: %.2f KB/s", bandwidth/1024))
 
-	hashChannel := make(chan []byte, 1000)
-	streamChannel := make(chan []byte, 1000)
+	// -----------------------------
+	// CHUNKING (metadata only)
+	// -----------------------------
+	jobs := make(chan models.Chunk, 100)
 
-	for chunk := range worker {
-		hashChannel <- chunk
-		streamChannel <- chunk
-		go func() {
-			hash := internal.Hasher(hashChannel)
-			streamChannel <- []byte(hash)
-		}()
+	totalChunks := internal.Chunker(
+		file,
+		models.Network{
+			Bandwidth: bandwidth,
+			RTT:       rttSecs,
+		},
+		4,              // workers
+		1*1024*1024,    // buffer heuristic
+		jobs,
+	)
+
+	fmt.Println(greenf("Total Chunks: %d", totalChunks))
+
+	// -----------------------------
+	// STREAMING (multi-connection)
+	// -----------------------------
+	cfg := models.StreamerConfig{
+		Addr:        targetAddr,
+		Workers:     4,        // parallel connections
+		ChunkSize:   4 * 1024 * 1024,
+		RetryBuffer: 50,
 	}
 
+	fmt.Println(greenf("Starting parallel streaming..."))
 
-
-	
-
-	// Stream the file
-	fmt.Printf(" Sending %s (%d bytes)...\n", meta.Name, meta.Size)
-	sent, err := io.Copy(conn, file)
+	err = internal.Streamer(file, jobs, cfg)
 	if err != nil {
-		fmt.Printf("\n Transfer interrupted: %v\n", err)
+		fmt.Println(redf("Transfer failed: %v", err))
+		os.Exit(1)
 	}
 
-	fmt.Printf("\n Success! Sent %d bytes.\n", sent)
+	fmt.Println(greenf("Transfer complete"))
 }
