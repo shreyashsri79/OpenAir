@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grandcat/zeroconf"
@@ -24,7 +25,7 @@ const (
 	ansiRed   = "\x1b[31m"
 )
 
-// ---------- COLOR HELPERS ----------
+// ---------- COLOR ----------
 
 func greenf(format string, a ...any) string {
 	return ansiGreen + fmt.Sprintf(format, a...) + ansiReset
@@ -34,7 +35,7 @@ func redf(format string, a ...any) string {
 	return ansiRed + fmt.Sprintf(format, a...) + ansiReset
 }
 
-// ---------- STRUCTS (must match sender) ----------
+// ---------- STRUCTS ----------
 
 type Meta struct {
 	Name      string `json:"name"`
@@ -51,8 +52,8 @@ type ReceiverMeta struct {
 
 var (
 	file        *os.File
-	chunkSize   int64 = 4 * 1024 * 1024 // must match sender config
 	initialized bool
+	mu          sync.Mutex // protects file writes (optional safety)
 )
 
 // ---------- MAIN ----------
@@ -60,7 +61,6 @@ var (
 func main() {
 	fmt.Println(greenf("Starting OpenAir Receiver..."))
 
-	// Start mDNS
 	mdns, err := zeroconf.Register(
 		"OpenAir-Receiver",
 		ServiceType,
@@ -91,43 +91,36 @@ func main() {
 		if err != nil {
 			continue
 		}
-
 		go handleConnection(conn)
 	}
 }
 
-// ---------- CONNECTION HANDLER ----------
+// ---------- ROUTER ----------
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
 
-	// Try reading first byte to detect if it's control or data
 	peek, err := reader.Peek(1)
 	if err != nil {
 		return
 	}
 
-	// If it's '{' → JSON → control connection
 	if peek[0] == '{' {
 		handleControl(conn, reader)
-		return
+	} else {
+		handleData(conn, reader)
 	}
-
-	// Else → data connection
-	handleData(conn, reader)
 }
 
-// ---------- CONTROL CONNECTION ----------
+// ---------- CONTROL ----------
 
 func handleControl(conn net.Conn, reader *bufio.Reader) {
 	fmt.Println(greenf("Control connection established"))
 
-	// Read metadata JSON
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println(redf("Failed to read metadata"))
 		return
 	}
 
@@ -140,37 +133,35 @@ func handleControl(conn net.Conn, reader *bufio.Reader) {
 
 	fmt.Println(greenf("Incoming file: %s (%d bytes)", meta.Name, meta.Size))
 
-	// Create output file
 	file, err = os.Create("received_" + meta.Name)
 	if err != nil {
 		fmt.Println(redf("File creation failed: %v", err))
 		return
 	}
 
-	// Pre-allocate file (important)
+	// pre-allocate
 	file.Truncate(meta.Size)
 
 	initialized = true
 
-	// Send ACCEPT
+	// ACCEPT
 	conn.Write([]byte("ACCEPT\n"))
 
-	// Send RTT + bandwidth probe
-	now := time.Now().Unix()
-	dataSize := 1 * 1024 * 1024 // 1MB probe
+	// FIXED RTT (milliseconds)
+	now := time.Now().UnixMilli()
 
-	response := ReceiverMeta{
+	resp := ReceiverMeta{
 		Timestamp: now,
-		Data:      fmt.Sprintf("ACK:%d", dataSize),
+		Data:      fmt.Sprintf("ACK:%d", 1024*1024),
 	}
 
-	respJSON, _ := json.Marshal(response)
-	conn.Write(append(respJSON, '\n'))
+	js, _ := json.Marshal(resp)
+	conn.Write(append(js, '\n'))
 
 	fmt.Println(greenf("Handshake complete"))
 }
 
-// ---------- DATA CONNECTION ----------
+// ---------- DATA ----------
 
 func handleData(conn net.Conn, reader *bufio.Reader) {
 	if !initialized {
@@ -178,33 +169,33 @@ func handleData(conn net.Conn, reader *bufio.Reader) {
 	}
 
 	for {
-		var chunkID int32
+		var offset int64
 		var size int32
 
-		// Read chunk ID
-		if err := binary.Read(reader, binary.LittleEndian, &chunkID); err != nil {
+		// read offset
+		if err := binary.Read(reader, binary.LittleEndian, &offset); err != nil {
 			return
 		}
 
-		// Read chunk size
+		// read size
 		if err := binary.Read(reader, binary.LittleEndian, &size); err != nil {
 			return
 		}
 
 		buf := make([]byte, size)
 
-		// Read chunk data
 		_, err := io.ReadFull(reader, buf)
 		if err != nil {
 			return
 		}
 
-		// Compute offset (MVP assumption: fixed chunk size)
-		offset := int64(chunkID) * chunkSize
-
+		// safe write
+		mu.Lock()
 		_, err = file.WriteAt(buf, offset)
+		mu.Unlock()
+
 		if err != nil {
-			fmt.Println(redf("Write error"))
+			fmt.Println(redf("Write error: %v", err))
 			return
 		}
 	}

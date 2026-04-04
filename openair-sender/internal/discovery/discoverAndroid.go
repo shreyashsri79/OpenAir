@@ -3,13 +3,15 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/grandcat/zeroconf"
 )
 
 func DiscoverAndroid() (string, int, error) {
-	fmt.Println("🔍 Scanning for OpenAir Android device...")
+	fmt.Println("Scanning for OpenAir device...")
+
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
 		return "", 0, err
@@ -26,13 +28,44 @@ func DiscoverAndroid() (string, int, error) {
 		}
 	}()
 
-	select {
-	case entry := <-entries:
-		// Prefer IPv4
-		addr := entry.AddrIPv4[0].String()
-		fmt.Printf("✅ Found: %s at %s:%d\n", entry.Instance, addr, entry.Port)
-		return addr, entry.Port, nil
-	case <-ctx.Done():
-		return "", 0, fmt.Errorf("discovery timed out")
+	for {
+		select {
+		case entry := <-entries:
+			// 🔥 Pick correct IP (ignore virtual adapters)
+			var addr string
+
+			for _, ip := range entry.AddrIPv4 {
+				ipStr := ip.String()
+
+				// Prefer real LAN IPs
+				if strings.HasPrefix(ipStr, "192.168.") ||
+					strings.HasPrefix(ipStr, "10.") ||
+					strings.HasPrefix(ipStr, "172.") {
+
+					// Skip known bad ranges (VirtualBox etc.)
+					if strings.HasPrefix(ipStr, "192.168.56.") {
+						continue
+					}
+
+					addr = ipStr
+					break
+				}
+			}
+
+			// fallback
+			if addr == "" && len(entry.AddrIPv4) > 0 {
+				addr = entry.AddrIPv4[0].String()
+			}
+
+			if addr == "" {
+				continue
+			}
+
+			fmt.Printf("Found: %s at %s:%d\n", entry.Instance, addr, entry.Port)
+			return addr, entry.Port, nil
+
+		case <-ctx.Done():
+			return "", 0, fmt.Errorf("discovery timed out")
+		}
 	}
 }
