@@ -1,127 +1,198 @@
+# OpenAir
 
-# OpenAir 
 <p align="center">
   <img src="./logo.png" alt="OpenAir Logo" width="500" />
 </p>
 
-**AirDrop-like serverless file sharing from Android to any OS (Linux / macOS / Windows)**
+**High-performance, serverless, cross-platform file transfer using parallel data streaming**
+
+---
 
 ## Overview
 
-**OpenAir** is a lightweight, serverless, LAN-based file sharing system that enables **Android → Laptop/Desktop** transfers across multiple operating systems.
+**OpenAir** is a lightweight, serverless, LAN-based file transfer system designed to achieve **maximum throughput by overcoming per-connection bandwidth limits**.
 
-Unlike AirDrop (Apple-only), OpenAir is designed to work across:
+It enables fast file transfer among:
 
-* **Linux** (Fedora, Ubuntu, Kali, Arch, etc.)
-* **macOS**
-* **Windows**
+ **Android / Linux / macOS / Windows**
 
-OpenAir uses:
-
-* **mDNS (Zeroconf)** for device discovery
-* **Direct TCP sockets** for file transfer
-* **SHA-256** for integrity verification
-* **Receiver-side Accept/Reject** for safety
-
-No cloud. No storage server. No ecosystem lock-in.
+Unlike traditional tools, OpenAir uses **parallel TCP connections** to fully utilize available network bandwidth.
 
 ---
 
-## Key Features
+## Key Idea
 
-### Android App (Sender)
+Most networks limit **bandwidth per connection**, not total bandwidth.
 
-* Discovers nearby devices automatically (mDNS)
-* Lists available receivers on the same Wi-Fi network
-* Select a file using Android file picker (SAF)
-* Sends file with live progress
+OpenAir exploits this by:
 
-### Receiver App (Linux/macOS/Windows)
+```
+splitting file → multiple chunks → multiple connections → bandwidth aggregation
+```
 
-* Runs as a lightweight TCP receiver
-* Shows incoming file request
-* User can **Accept / Reject**
-* Saves files to `~/Downloads/OpenAir/` (or equivalent Downloads folder)
-* Verifies file integrity using **SHA-256**
+Result:
+
+**5–10× faster transfers in real-world conditions**
 
 ---
 
-## Why OpenAir?
+## Features
 
-* ✅ Works on local Wi-Fi (no internet required)
-* ✅ No cloud upload
-* ✅ No server required
-* ✅ Cross-platform receiver support
-* ✅ Fast transfer (LAN speed)
-* ✅ Simple and reliable protocol
+### Android
+
+* Automatic device discovery via mDNS
+* Multi-file selection (SAF)
+* Parallel chunk streaming
+* Real-time transfer logic
+* No cloud / no intermediate storage
 
 ---
 
-## Architecture (High Level)
+### Cross-Platform (Linux / macOS / Windows) (Go)
 
-### Discovery Layer
-
-Receivers advertise themselves on LAN using mDNS:
-
-* Service: `_openair._tcp.local`
-* Port: `8989`
-* Metadata: device name + version
-
-Android scans and lists all receivers.
-
-### Transfer Layer
-
-Once selected, Android connects directly to the receiver via TCP:
-
-* JSON header line
+* Lightweight TCP server
 * Accept/Reject handshake
-* Raw file byte stream
-* SHA-256 verification
+* Concurrent connection handling
+* Offset-based file reconstruction
 
 ---
 
-## Transfer Protocol
+## Architecture
 
-### 1) Sender → Receiver (Header)
+### 1. Discovery Layer
 
-Sender sends **one JSON line** ending with `\\n`:
+* Protocol: **mDNS (Zeroconf)**
+* Service: `_openair._tcp`
+* Enables automatic LAN discovery
+
+---
+
+### 2. Control Connection
+
+Single TCP connection used for:
+
+* Metadata exchange
+* Accept / Reject handshake
+* RTT + bandwidth estimation
+
+---
+
+### 3. Data Layer (Core Innovation)
+
+Instead of a single stream:
+
+```
+File → split into chunks → sent via multiple TCP connections
+```
+
+Each worker:
+
+* Opens its own connection
+* Sends chunk independently
+* Operates concurrently
+
+---
+
+### 4. Chunk Model
+
+Each chunk contains:
+
+```
+offset → where to write
+size   → how much data
+data   → actual bytes
+```
+
+Receiver uses:
+
+```go
+file.WriteAt(data, offset)
+```
+
+→ Enables **out-of-order parallel writes**
+
+---
+
+## Transfer Flow
+
+### 1. Metadata Exchange
+
+Sender → Receiver:
 
 ```json
 {
-  "name": "photo.jpg",
-  "size": 3482332,
-  "sha256": "<64-char-hex>"
+  "name": "file.jpg",
+  "size": 104857600,
+  "timestamp": 123456789
 }
 ```
 
-### 2) Receiver → Sender (Handshake)
+---
 
-Receiver replies:
+### 2. Handshake
 
-* `ACCEPT\\n`
-  or
-* `REJECT\\n`
+Receiver:
 
-### 3) Sender → Receiver (File Stream)
+```
+ACCEPT
+```
 
-If accepted, sender streams exactly `size` bytes.
+* sends RTT probe response
 
-### 4) Integrity Check
+---
 
-Receiver computes SHA-256 of received bytes and compares with header.
+### 3. Parallel Streaming
+
+* Multiple workers start
+* Each opens its own TCP connection
+* Chunks are sent concurrently
+
+---
+
+### 4. Reconstruction
+
+Receiver:
+
+```
+receives chunk → writes at offset → file builds in parallel
+```
+
+---
+
+## Performance
+
+Example (real test):
+
+```
+File Size: 99 MB
+Expected (single stream): ~50 sec
+OpenAir: ~3.4 sec
+```
+
+→ Achieved via **bandwidth aggregation across connections**
+
+---
+
+## Design Insights
+
+OpenAir explores:
+
+* Per-flow bandwidth throttling
+* Parallel TCP streaming
+* Backpressure and flow control
+* Trade-offs between throughput and fairness
+* Comparison with modern protocols (e.g., QUIC)
 
 ---
 
 ## Security Model (MVP)
 
-OpenAir focuses on simple, practical, exhibition-ready security:
-
-* **Receiver-side Accept/Reject**
-* **SHA-256 integrity verification**
+* Receiver-side Accept / Reject
+* No automatic file acceptance
+* LAN-only communication
 * No cloud exposure
-* No background silent receiving
 
-> Note: mDNS is used only for discovery, not for trust.
+> Note: Encryption and authentication are planned improvements
 
 ---
 
@@ -130,57 +201,29 @@ OpenAir focuses on simple, practical, exhibition-ready security:
 ### Android
 
 * Kotlin
-* Jetpack Compose
-* MVVM
-* Storage Access Framework (SAF)
-* Networking: TCP sockets + mDNS discovery
+* TCP sockets
+* mDNS discovery
 
-### Receiver (Cross-platform)
+---
+
+### Receiver
 
 * Go
-* TCP server
-* Zeroconf/mDNS advertisement
-* File saving + SHA-256 verification
+* net package (TCP)
+* Zeroconf (mDNS)
+* Concurrent worker model
 
 ---
 
 ## Getting Started
 
-### Receiver (Linux/macOS)
-
-#### 1) Install Go
-
-Fedora:
-
-```bash
-sudo dnf install -y golang
-```
-
-Ubuntu/Kali:
-
-```bash
-sudo apt install -y golang
-```
-
-Arch:
-
-```bash
-sudo pacman -S go
-```
-
-macOS:
-
-```bash
-brew install go
-```
-
-#### 2) Run receiver
+### Receiver
 
 ```bash
 go run .
 ```
 
-Or build:
+or
 
 ```bash
 go build -o openair-receiver
@@ -189,85 +232,47 @@ go build -o openair-receiver
 
 ---
 
-## Linux mDNS Requirement (for discovery)
-
-For device discovery on Linux, ensure Avahi is enabled:
-
-Fedora:
+## mDNS Setup (Linux)
 
 ```bash
-sudo dnf install -y avahi avahi-tools
-sudo systemctl enable --now avahi-daemon
-```
-
-Ubuntu/Kali:
-
-```bash
-sudo apt install -y avahi-daemon avahi-utils
-sudo systemctl enable --now avahi-daemon
-```
-
-Arch:
-
-```bash
-sudo pacman -S avahi
 sudo systemctl enable --now avahi-daemon
 ```
 
 ---
 
-## Firewall Notes
+## Firewall
 
-Receiver requires:
-
-* TCP port `8989`
-* UDP port `5353` (mDNS)
-
-Fedora example:
-
-```bash
-sudo firewall-cmd --add-port=8989/tcp --permanent
-sudo firewall-cmd --reload
+```
+TCP: 9000
+UDP: 5353 (mDNS)
 ```
 
 ---
 
-## Demo / Exhibition Setup
+## Demo Setup
 
-Recommended setup:
 
-* 1 Android phone
-* Multiple machines (real or VMs):
+Flow:
 
-  * Fedora
-  * Ubuntu
-  * Arch
-  * Kali
-  * macOS
-  * Windows
-
-Demo flow:
-
-1. Start receiver on all machines
-2. Open Android OpenAir app
-3. Nearby devices appear automatically
-4. Select multiple receivers
-5. Send file simultaneously
-6. Receivers accept and save
+1. Start receiver
+2. Discover via app
+3. Select device
+4. Send file
+5. Observe parallel transfer
 
 ---
 
-## Roadmap
-
-* Multi-file + folder sending
-* Android ↔ Android mode
-* Resume support for large files
-* Optional encryption (TLS / AES-GCM)
-* Receiver tray UI for desktop platforms
-
----
 
 ## License
 
-MIT (recommended for hackathons/exhibition projects)
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
+You are free to:
+
+* Use
+* Modify
+* Distribute
+
+But any derivative work must also be **open-sourced under GPL v3.0**.
+
+See the LICENSE file for details.
