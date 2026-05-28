@@ -2,26 +2,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Required for TCP sockets -->
+    <!-- ── Network permissions ──────────────────────────────────────────────
+         INTERNET               : Required by NsdManager on API 31+ (Tiramisu)
+                                  and for outbound TCP file transfers.
+         ACCESS_NETWORK_STATE   : Read network info before attempting transfers.
+         CHANGE_NETWORK_STATE   : Required for mDNS service discovery setup.
+         ACCESS_WIFI_STATE      : Check if Wi-Fi is available before scanning.
+         CHANGE_WIFI_MULTICAST_STATE : Allows the Wi-Fi radio to receive mDNS
+                                  multicast packets (otherwise filtered by HW).
+    ──────────────────────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Helps for network status checks -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- Required for mDNS discovery on many devices -->
-    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
-
-    <!-- Android 13+ requirement for Wi-Fi device discovery (mDNS/NSD) -->
-    <uses-permission
-        android:name="android.permission.NEARBY_WIFI_DEVICES"
-        android:usesPermissionFlags="neverForLocation"
-        tools:targetApi="33" />
-
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <application
         android:allowBackup="true"
@@ -32,7 +26,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.OpenAir">
-
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -40,9 +33,10 @@
             android:theme="@style/Theme.OpenAir">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
     </application>
+
 </manifest>

@@ -1,58 +1,59 @@
 package com.example.openair.ui.theme
 
-import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+// ── Custom color holder (bypasses M3 dynamic color system) ───────────────────
+data class OpenAirColors(
+    val paperWhite : androidx.compose.ui.graphics.Color = PaperWhite,
+    val paperCream : androidx.compose.ui.graphics.Color = PaperCream,
+    val paperDeep  : androidx.compose.ui.graphics.Color = PaperDeep,
+    val inkBlack   : androidx.compose.ui.graphics.Color = InkBlack,
+    val inkFaded   : androidx.compose.ui.graphics.Color = InkFaded,
+    val inkLight   : androidx.compose.ui.graphics.Color = InkLight,
+    val oceanDeep  : androidx.compose.ui.graphics.Color = OceanDeep,
+    val oceanMid   : androidx.compose.ui.graphics.Color = OceanMid,
+    val oceanLight : androidx.compose.ui.graphics.Color = OceanLight,
+    val markerRed  : androidx.compose.ui.graphics.Color = MarkerRed,
+    val markerGreen: androidx.compose.ui.graphics.Color = MarkerGreen,
+    val markerAmber: androidx.compose.ui.graphics.Color = MarkerAmber
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+val LocalOpenAirColors = staticCompositionLocalOf { OpenAirColors() }
 
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+// ── M3 color scheme wired to Paper/Ink tokens ─────────────────────────────────
+private val PaperColorScheme = lightColorScheme(
+    primary         = OceanDeep,
+    onPrimary       = PaperWhite,
+    primaryContainer = OceanLight,
+    onPrimaryContainer = OceanDeep,
+    secondary       = OceanMid,
+    onSecondary     = PaperWhite,
+    background      = PaperWhite,
+    onBackground    = InkBlack,
+    surface         = PaperWhite,
+    onSurface       = InkBlack,
+    surfaceVariant  = PaperCream,
+    onSurfaceVariant = InkFaded,
+    outline         = InkLight,
+    error           = MarkerRed,
+    onError         = PaperWhite
 )
 
 @Composable
 fun OpenAirTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    // Dynamic color is intentionally disabled — the Paper aesthetic must be consistent
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+    CompositionLocalProvider(LocalOpenAirColors provides OpenAirColors()) {
+        MaterialTheme(
+            colorScheme = PaperColorScheme,
+            typography  = Typography,
+            content     = content
+        )
     }
-
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
 }

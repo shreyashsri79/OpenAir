@@ -1,37 +1,108 @@
 package com.example.openair.ui.theme
 
 import androidx.compose.material3.Typography
-import androidx.compose.ui.text.font.Font
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.googlefonts.Font
+import androidx.compose.ui.text.googlefonts.GoogleFont
+import androidx.compose.ui.unit.sp
 import com.example.openair.R
 
-// 1) Put comic_sans.ttf in: app/src/main/res/font/comic_sans.ttf
-private val ComicSans = FontFamily(
-    Font(R.font.comic_sans, FontWeight.Normal)
+// ── Google Fonts provider ─────────────────────────────────────────────────────
+val GoogleFontsProvider = GoogleFont.Provider(
+    providerAuthority = "com.google.android.gms.fonts",
+    providerPackage   = "com.google.android.gms",
+    certificates      = R.array.com_google_android_gms_fonts_certs
 )
 
-// 2) Apply Comic Sans to ALL Material3 text styles
-val Typography = Typography().run {
-    copy(
-        displayLarge = displayLarge.copy(fontFamily = ComicSans),
-        displayMedium = displayMedium.copy(fontFamily = ComicSans),
-        displaySmall = displaySmall.copy(fontFamily = ComicSans),
-
-        headlineLarge = headlineLarge.copy(fontFamily = ComicSans),
-        headlineMedium = headlineMedium.copy(fontFamily = ComicSans),
-        headlineSmall = headlineSmall.copy(fontFamily = ComicSans),
-
-        titleLarge = titleLarge.copy(fontFamily = ComicSans),
-        titleMedium = titleMedium.copy(fontFamily = ComicSans),
-        titleSmall = titleSmall.copy(fontFamily = ComicSans),
-
-        bodyLarge = bodyLarge.copy(fontFamily = ComicSans),
-        bodyMedium = bodyMedium.copy(fontFamily = ComicSans),
-        bodySmall = bodySmall.copy(fontFamily = ComicSans),
-
-        labelLarge = labelLarge.copy(fontFamily = ComicSans),
-        labelMedium = labelMedium.copy(fontFamily = ComicSans),
-        labelSmall = labelSmall.copy(fontFamily = ComicSans),
+// ── Font families ─────────────────────────────────────────────────────────────
+/** Looks hand-lettered — used for section headers, app name, CTAs */
+val PermanentMarkerFamily = FontFamily(
+    Font(
+        googleFont    = GoogleFont("Permanent Marker"),
+        fontProvider  = GoogleFontsProvider,
+        weight        = FontWeight.Normal
     )
-}
+)
+
+/** Readable notebook cursive — used for body text, labels, device names */
+val CaveatFamily = FontFamily(
+    Font(
+        googleFont    = GoogleFont("Caveat"),
+        fontProvider  = GoogleFontsProvider,
+        weight        = FontWeight.Normal
+    ),
+    Font(
+        googleFont    = GoogleFont("Caveat"),
+        fontProvider  = GoogleFontsProvider,
+        weight        = FontWeight.Bold
+    )
+)
+
+// ── Typography scale ─────────────────────────────────────────────────────────
+val Typography = Typography(
+    displayLarge  = TextStyle(
+        fontFamily   = PermanentMarkerFamily,
+        fontWeight   = FontWeight.Normal,
+        fontSize     = 32.sp,
+        lineHeight   = 36.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineLarge = TextStyle(
+        fontFamily   = PermanentMarkerFamily,
+        fontWeight   = FontWeight.Normal,
+        fontSize     = 24.sp,
+        lineHeight   = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineMedium = TextStyle(
+        fontFamily   = PermanentMarkerFamily,
+        fontWeight   = FontWeight.Normal,
+        fontSize     = 20.sp,
+        lineHeight   = 24.sp,
+        letterSpacing = 0.sp
+    ),
+    titleLarge = TextStyle(
+        fontFamily   = CaveatFamily,
+        fontWeight   = FontWeight.Bold,
+        fontSize     = 22.sp,
+        lineHeight   = 26.sp,
+        letterSpacing = 0.sp
+    ),
+    titleMedium = TextStyle(
+        fontFamily   = CaveatFamily,
+        fontWeight   = FontWeight.Bold,
+        fontSize     = 18.sp,
+        lineHeight   = 22.sp,
+        letterSpacing = 0.sp
+    ),
+    bodyLarge = TextStyle(
+        fontFamily   = CaveatFamily,
+        fontWeight   = FontWeight.Normal,
+        fontSize     = 18.sp,
+        lineHeight   = 24.sp,
+        letterSpacing = 0.sp
+    ),
+    bodyMedium = TextStyle(
+        fontFamily   = CaveatFamily,
+        fontWeight   = FontWeight.Normal,
+        fontSize     = 16.sp,
+        lineHeight   = 22.sp,
+        letterSpacing = 0.sp
+    ),
+    labelLarge = TextStyle(
+        fontFamily   = CaveatFamily,
+        fontWeight   = FontWeight.Bold,
+        fontSize     = 16.sp,
+        lineHeight   = 20.sp,
+        letterSpacing = 0.sp
+    ),
+    labelMedium = TextStyle(
+        fontFamily   = CaveatFamily,
+        fontWeight   = FontWeight.Normal,
+        fontSize     = 14.sp,
+        lineHeight   = 18.sp,
+        letterSpacing = 0.sp
+    )
+)

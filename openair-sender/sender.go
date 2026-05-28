@@ -48,7 +48,6 @@ func main() {
 
 	filePath := os.Args[1]
 
-	// Discover receiver
 	host, port, err := discovery.DiscoverAndroid()
 	if err != nil {
 		fmt.Println(redf("Discovery error: %v", err))
@@ -56,7 +55,6 @@ func main() {
 	}
 	targetAddr := fmt.Sprintf("%s:%d", host, port)
 
-	// Open file
 	file, err := os.Open(filePath)
 	if err != nil {
 		fmt.Println(redf("File open error: %v", err))
@@ -66,14 +64,12 @@ func main() {
 
 	fileInfo, _ := file.Stat()
 
-	// Prepare metadata
 	meta := Meta{
 		Name:      filepath.Base(filePath),
 		Size:      fileInfo.Size(),
 		Timestamp: time.Now().Unix(),
 	}
 
-	// Control connection (ONLY for handshake)
 	conn, err := net.DialTimeout("tcp", targetAddr, 5*time.Second)
 	if err != nil {
 		fmt.Println(redf("Connection failed: %v", err))
@@ -83,33 +79,26 @@ func main() {
 
 	fmt.Println(greenf("Connected to receiver"))
 
-	// Send metadata
 	header, _ := json.Marshal(meta)
 	conn.Write(append(header, '\n'))
 
 	reader := bufio.NewReader(conn)
 
-	// Wait for ACCEPT
 	response, err := reader.ReadString('\n')
 	if err != nil || !strings.Contains(strings.ToUpper(response), "ACCEPT") {
 		fmt.Println(redf("Receiver rejected: %v", response))
 		os.Exit(1)
 	}
 
-	// Receive receiver meta (RTT + bandwidth probe)
 	metaLine, _ := reader.ReadString('\n')
 	metaLine = strings.TrimSpace(metaLine)
 
 	var recvMeta ReceiverMeta
 	json.Unmarshal([]byte(metaLine), &recvMeta)
 
-	// RTT calculation
 	rttMillis := time.Now().UnixMilli() - (recvMeta.Timestamp * 1000)
 	rttSecs := float64(rttMillis) / 1000.0
 
-	fmt.Println(greenf("RTT: %.2f ms", float64(rttMillis)))
-
-	// Bandwidth estimation
 	var bandwidth float64
 	if strings.HasPrefix(recvMeta.Data, "ACK:") {
 		var byteCount int64
@@ -120,11 +109,6 @@ func main() {
 		}
 	}
 
-	fmt.Println(greenf("Estimated Bandwidth: %.2f KB/s", bandwidth/1024))
-
-	// -----------------------------
-	// CHUNKING (metadata only)
-	// -----------------------------
 	jobs := make(chan models.Chunk, 100)
 
 	totalChunks := internal.Chunker(
@@ -138,11 +122,8 @@ func main() {
 		jobs,
 	)
 
-	fmt.Println(greenf("Total Chunks: %d", totalChunks))
+	_ = totalChunks
 
-	// -----------------------------
-	// STREAMING (multi-connection)
-	// -----------------------------
 	cfg := models.StreamerConfig{
 		Addr:        targetAddr,
 		Workers:     4,        // parallel connections
