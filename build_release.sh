@@ -4,40 +4,9 @@ set -e
 WORKSPACE="/home/shreyashneeraj/Work/OpenAir"
 RELEASE_DIR="$WORKSPACE/release"
 
-mkdir -p "$RELEASE_DIR/cli"
 mkdir -p "$RELEASE_DIR/gui"
 mkdir -p "$RELEASE_DIR/android"
 
-echo "========================================="
-echo "   Building OpenAir CLI (Cross-Platform)"
-echo "========================================="
-cd "$WORKSPACE/openair-cli"
-
-build_cli() {
-    local os=$1
-    local arch=$2
-    local suffix=$3
-    local binary_name="openair-cli-${os}-${arch}${suffix}"
-    
-    echo "Building CLI for ${os}/${arch}..."
-    CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags="-s -w" -o "bin/$binary_name" ./cmd/openair/main.go
-    
-    if [ "$os" == "windows" ]; then
-        zip -j "$RELEASE_DIR/cli/${binary_name}.zip" "bin/$binary_name" > /dev/null
-    else
-        tar -czvf "$RELEASE_DIR/cli/${binary_name}.tar.gz" -C bin "$binary_name" > /dev/null
-    fi
-}
-
-mkdir -p bin
-build_cli linux amd64 ""
-build_cli linux arm64 ""
-build_cli windows amd64 ".exe"
-build_cli darwin amd64 ""
-build_cli darwin arm64 ""
-rm -rf bin
-
-echo ""
 echo "========================================="
 echo "   Building OpenAir GUI (Cross-Platform)"
 echo "========================================="
@@ -83,12 +52,15 @@ if [ -f "gradlew" ]; then
     chmod +x gradlew
     ./gradlew assembleRelease -x lintVitalAnalyzeRelease -x lint
     
-    APK_PATH="app/build/outputs/apk/release/app-release-unsigned.apk"
-    if [ -f "$APK_PATH" ]; then
-        cp "$APK_PATH" "$RELEASE_DIR/android/openair-android-release-unsigned.apk"
-        echo "Android APK compiled and packaged successfully."
+    APK_DIR="app/build/outputs/apk/release"
+    if [ -f "$APK_DIR/app-release.apk" ]; then
+        cp "$APK_DIR/app-release.apk" "$RELEASE_DIR/android/openair-android-release.apk"
+        echo "Android APK (signed) compiled and packaged successfully."
+    elif [ -f "$APK_DIR/app-release-unsigned.apk" ]; then
+        cp "$APK_DIR/app-release-unsigned.apk" "$RELEASE_DIR/android/openair-android-release-unsigned.apk"
+        echo "Warning: APK is unsigned (no keystore.properties found) — it will not install on devices."
     else
-        echo "Warning: APK was not found at $APK_PATH"
+        echo "Warning: APK was not found in $APK_DIR"
     fi
 else
     echo "Warning: gradlew not found in openair-android"

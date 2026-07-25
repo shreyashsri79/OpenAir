@@ -31,14 +31,9 @@ type ReceiverMeta struct {
 	Data      string `json:"data"`
 }
 
-func RunSender(filePath string, onLog func(string)) error {
-
-
-	host, port, err := DiscoverAndroid()
-	if err != nil {
-		return fmt.Errorf("discovery error: %w", err)
-	}
-	targetAddr := fmt.Sprintf("%s:%d", host, port)
+// RunSenderTo sends one file to a specific receiver address.
+func RunSenderTo(host string, port int, filePath string, onLog func(string)) error {
+	targetAddr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 
 	file, err := os.Open(filePath)
 	if err != nil {

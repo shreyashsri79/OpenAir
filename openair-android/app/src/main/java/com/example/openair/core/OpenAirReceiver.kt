@@ -41,7 +41,8 @@ import java.util.concurrent.atomic.AtomicLong
 //
 // MediaStore integration:
 //   • IS_PENDING=1 during transfer  → file invisible in gallery until complete
-//   • IS_PENDING=0 on completion    → file appears in Downloads
+//   • IS_PENDING=0 on completion    → images appear in gallery (Pictures/OpenAir),
+//                                     everything else in Downloads
 //   • Requires API 29+; for API 26-28 we fall back to getExternalFilesDir.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -387,17 +388,39 @@ object OpenAirReceiver {
         val uri         : Uri,
     )
 
+    /** MIME type guessed from the file extension; null when unknown. */
+    private fun mimeTypeOf(fileName: String): String? {
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        if (ext.isEmpty()) return null
+        return android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    }
+
     @SuppressLint("InlinedApi")
     private fun createMediaStoreFile(context: Context, fileName: String): MediaStoreFile? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // API 29+ — write to MediaStore Downloads (visible in Files app).
+            // API 29+ — images go to MediaStore Images under Pictures/OpenAir
+            // (visible in the gallery as an "OpenAir" album); everything else
+            // goes to MediaStore Downloads (visible in Files app).
             val resolver = context.contentResolver
-            val values   = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE,    "application/octet-stream")
-                put(MediaStore.Downloads.IS_PENDING,   1)
+            val mime     = mimeTypeOf(fileName)
+            val isImage  = mime?.startsWith("image/") == true
+
+            val (collection, values) = if (isImage) {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI to ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME,  fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE,     mime)
+                    put(MediaStore.Images.Media.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_PICTURES + "/OpenAir")
+                    put(MediaStore.Images.Media.IS_PENDING,    1)
+                }
+            } else {
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI to ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE,    mime ?: "application/octet-stream")
+                    put(MediaStore.Downloads.IS_PENDING,   1)
+                }
             }
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            val uri = resolver.insert(collection, values)
                 ?: return null
 
             val pfd = resolver.openFileDescriptor(uri, "rw") ?: run {
@@ -430,7 +453,7 @@ object OpenAirReceiver {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
                 val values = ContentValues().apply {
-                    put(MediaStore.Downloads.IS_PENDING, 0)
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
                 }
                 context.contentResolver.update(uri, values, null, null)
             }

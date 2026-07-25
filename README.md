@@ -217,18 +217,16 @@ OpenAir explores:
 
 ## Getting Started
 
-### Receiver
+### Desktop GUI
 
 ```bash
+cd openair-gui
 go run .
 ```
 
-or
+### Android
 
-```bash
-go build -o openair-receiver
-./openair-receiver
-```
+Open `openair-android` in Android Studio, or build via `./gradlew assembleRelease`.
 
 ---
 

@@ -38,18 +38,28 @@ fun OpenAirScreen(
         uris.forEach { vm.onFilePicked(it) }
     }
 
+    // Folder picker — the tree is zipped in the ViewModel, then attached.
+    val folderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let { vm.onFolderPicked(it) }
+    }
+
     val callbacks = OpenAirCallbacks(
         onToggleReceiver   = vm::toggleReceiver,
         onScanClick        = vm::startScan,
         onDeviceConnect    = vm::connectDevice,
         onDeviceDisconnect = vm::disconnectDevice,
         onAttachFile       = { filePicker.launch("*/*") },
+        onAttachFolder     = { folderPicker.launch(null) },
         onRemoveFile       = vm::removeFile,
         onPasteTextChange  = vm::updatePastedText,
         onSendClick        = vm::send,
         onDismissError     = vm::dismissError,
         onAcceptTransfer   = vm::acceptTransfer,
         onRejectTransfer   = vm::rejectTransfer,
+        onOpenReceivedFile = vm::openReceivedFile,
+        onClearReceived    = vm::clearReceivedHistory,
     )
 
     OpenAirContent(

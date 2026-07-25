@@ -40,10 +40,13 @@ enum class TransferDirection { SENDING, RECEIVING }
  */
 @Immutable
 data class ReceivedFile(
-    val id        : String,
-    val name      : String,
-    val sizeLabel : String,
-    val mediaUri  : String,   // android.net.Uri.toString()
+    val id         : String,
+    val name       : String,
+    val sizeLabel  : String,
+    val mediaUri   : String,   // android.net.Uri.toString()
+    val mimeType   : String = "application/octet-stream",
+    /** Epoch millis when the transfer completed. */
+    val receivedAt : Long   = 0L,
 )
 
 /**
@@ -95,6 +98,7 @@ data class OpenAirCallbacks(
     val onDeviceConnect     : (DeviceInfo) -> Unit         = {},
     val onDeviceDisconnect  : (DeviceInfo) -> Unit         = {},
     val onAttachFile        : () -> Unit                   = {},
+    val onAttachFolder      : () -> Unit                   = {},
     val onRemoveFile        : (FileAttachment) -> Unit     = {},
     val onPasteTextChange   : (String) -> Unit             = {},
     val onSendClick         : () -> Unit                   = {},
@@ -104,6 +108,10 @@ data class OpenAirCallbacks(
     val onAcceptTransfer    : () -> Unit                   = {},
     /** User tapped Reject on the incoming-transfer dialog. */
     val onRejectTransfer    : () -> Unit                   = {},
+    /** User tapped a row in the Received Files section — open the file. */
+    val onOpenReceivedFile  : (ReceivedFile) -> Unit       = {},
+    /** User tapped Clear on the Received Files section header. */
+    val onClearReceived     : () -> Unit                   = {},
 )
 
 // ── Preview / mock data ───────────────────────────────────────────────────────

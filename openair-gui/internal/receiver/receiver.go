@@ -70,31 +70,83 @@ var (
 	currentXfr *transferState
 )
 
+// ---------- LIFECYCLE ----------
+var (
+	ctrlMu   sync.Mutex
+	listener net.Listener
+	mdnsSrv  *zeroconf.Server
+	active   bool
+)
+
+// Stop shuts down the running receiver (idempotent).
+func Stop() {
+	ctrlMu.Lock()
+	defer ctrlMu.Unlock()
+	if !active {
+		return
+	}
+	active = false
+	if mdnsSrv != nil {
+		mdnsSrv.Shutdown()
+		mdnsSrv = nil
+	}
+	if listener != nil {
+		listener.Close()
+		listener = nil
+	}
+}
+
+func instanceName() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return "OpenAir-Receiver"
+	}
+	return "OpenAir-" + host
+}
+
 // ---------- MAIN ----------
 func RunReceiver() error {
+	ctrlMu.Lock()
+	if active {
+		ctrlMu.Unlock()
+		return fmt.Errorf("receiver already running")
+	}
+
 	OnLog(greenf("Starting OpenAir Receiver..."))
 
 	mdns, err := zeroconf.Register(
-		"OpenAir-Receiver", ServiceType, Domain, PORT,
+		instanceName(), ServiceType, Domain, PORT,
 		[]string{"app=OpenAir", "ver=1"}, nil,
 	)
 	if err != nil {
+		ctrlMu.Unlock()
 		return fmt.Errorf("mDNS error: %w", err)
 	}
-	defer mdns.Shutdown()
 	OnLog(greenf("mDNS active on port %d", PORT))
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", PORT))
 	if err != nil {
+		mdns.Shutdown()
+		ctrlMu.Unlock()
 		return fmt.Errorf("failed to listen: %w", err)
 	}
-	defer ln.Close()
+	mdnsSrv, listener, active = mdns, ln, true
+	ctrlMu.Unlock()
+	defer Stop()
+
 	OnLog(greenf("Listening on port %d", PORT))
 
 	// Accept loop — every connection (control or data) gets its own goroutine.
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			ctrlMu.Lock()
+			stillActive := active
+			ctrlMu.Unlock()
+			if !stillActive {
+				OnLog(greenf("Receiver stopped"))
+				return nil
+			}
 			continue
 		}
 		go handleConnection(conn)

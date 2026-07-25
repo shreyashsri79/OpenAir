@@ -62,6 +62,20 @@ class OpenAirViewModel(app: Application) : AndroidViewModel(app) {
 
     private val discoveryManager = NsdDiscoveryManager(app.applicationContext)
 
+    init {
+        // Discovery runs continuously from app open — no manual scan needed.
+        startScan()
+        // Restore the all-time received-files history from disk.
+        viewModelScope.launch(Dispatchers.IO) {
+            val history = loadReceivedHistory()
+            if (history.isNotEmpty()) {
+                withContext(Dispatchers.Main.immediate) {
+                    _uiState.update { it.copy(receivedFiles = history) }
+                }
+            }
+        }
+    }
+
     // ── Receiver toggle ───────────────────────────────────────────────────────
 
     fun toggleReceiver() {
@@ -110,10 +124,12 @@ class OpenAirViewModel(app: Application) : AndroidViewModel(app) {
             val sizeLabel = _uiState.value.activeTransfer?.transferStatus
                 ?.substringAfterLast("/ ") ?: ""
             val received = ReceivedFile(
-                id        = UUID.randomUUID().toString(),
-                name      = fileName,
-                sizeLabel = sizeLabel,
-                mediaUri  = uri.toString(),
+                id         = UUID.randomUUID().toString(),
+                name       = fileName,
+                sizeLabel  = sizeLabel,
+                mediaUri   = uri.toString(),
+                mimeType   = guessMimeType(fileName),
+                receivedAt = System.currentTimeMillis(),
             )
             // Mark IS_PENDING = 0 in MediaStore so the file appears in Downloads.
             OpenAirReceiver.markMediaStoreComplete(ctx, uri)
@@ -124,6 +140,7 @@ class OpenAirViewModel(app: Application) : AndroidViewModel(app) {
                     receivedFiles  = state.receivedFiles + received,
                 )
             }
+            persistReceivedHistory(_uiState.value.receivedFiles)
         }
 
         OpenAirReceiver.onError = { message ->
@@ -200,9 +217,20 @@ class OpenAirViewModel(app: Application) : AndroidViewModel(app) {
                         isConnected = false,
                     )
                     _uiState.update { state ->
+                        // Already connected → don't duplicate into available list.
+                        if (state.connectedDevices.any { it.id == newDevice.id }) return@update state
                         val updated = state.availableDevices
                             .filterNot { it.id == newDevice.id } + newDevice
                         state.copy(availableDevices = updated)
+                    }
+                }
+            },
+            onLost = { serviceName ->
+                viewModelScope.launch(Dispatchers.Main.immediate) {
+                    _uiState.update { state ->
+                        state.copy(
+                            availableDevices = state.availableDevices.filterNot { it.name == serviceName }
+                        )
                     }
                 }
             }
@@ -273,8 +301,81 @@ class OpenAirViewModel(app: Application) : AndroidViewModel(app) {
 
     fun attachFile() { /* file picker launcher lives in OpenAirScreen */ }
 
+    /**
+     * Zips a SAF folder tree (picked via OpenDocumentTree) into the app's cache
+     * dir, then attaches the resulting .zip like any other file.
+     */
+    fun onFolderPicked(treeUri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ctx  = getApplication<Application>().applicationContext
+            val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(ctx, treeUri)
+            if (root == null || !root.isDirectory) {
+                withContext(Dispatchers.Main.immediate) {
+                    _uiState.update { it.copy(error = "Cannot read that folder.") }
+                }
+                return@launch
+            }
+
+            val folderName = root.name ?: "folder"
+            val zipFile = java.io.File(
+                ctx.cacheDir,
+                "oa_zip_${System.currentTimeMillis()}_$folderName.zip"
+            )
+
+            try {
+                java.util.zip.ZipOutputStream(
+                    java.io.BufferedOutputStream(java.io.FileOutputStream(zipFile))
+                ).use { zos ->
+                    fun walk(dir: androidx.documentfile.provider.DocumentFile, path: String) {
+                        for (child in dir.listFiles()) {
+                            val name = child.name ?: continue
+                            val childPath = "$path/$name"
+                            if (child.isDirectory) {
+                                walk(child, childPath)
+                            } else {
+                                zos.putNextEntry(java.util.zip.ZipEntry(childPath))
+                                ctx.contentResolver.openInputStream(child.uri)?.use { it.copyTo(zos) }
+                                zos.closeEntry()
+                            }
+                        }
+                    }
+                    walk(root, folderName)
+                }
+            } catch (e: Exception) {
+                zipFile.delete()
+                withContext(Dispatchers.Main.immediate) {
+                    _uiState.update { it.copy(error = "Zip failed: ${e.message}") }
+                }
+                return@launch
+            }
+
+            val id = UUID.randomUUID().toString()
+            val attachment = FileAttachment(
+                id        = id,
+                name      = "$folderName.zip",
+                sizeLabel = formatBytes(zipFile.length()),
+                mimeType  = "application/zip",
+            )
+            fileUriMap[id] = Uri.fromFile(zipFile)
+
+            withContext(Dispatchers.Main.immediate) {
+                _uiState.update { state ->
+                    state.copy(attachedFiles = state.attachedFiles + attachment)
+                }
+            }
+        }
+    }
+
     fun removeFile(file: FileAttachment) {
-        fileUriMap.remove(file.id)
+        fileUriMap.remove(file.id)?.let { uri ->
+            // Zipped folders live in our cache dir — reclaim the space.
+            if (uri.scheme == "file") {
+                uri.path?.let { p ->
+                    val f = java.io.File(p)
+                    if (f.parentFile == getApplication<Application>().cacheDir) f.delete()
+                }
+            }
+        }
         _uiState.update { state ->
             state.copy(attachedFiles = state.attachedFiles.filterNot { it.id == file.id })
         }
@@ -292,9 +393,14 @@ class OpenAirViewModel(app: Application) : AndroidViewModel(app) {
     fun send() {
         val targets = _uiState.value.connectedDevices
         val files   = _uiState.value.attachedFiles
+        val text    = _uiState.value.pastedText.trim()
 
-        if (targets.isEmpty() || files.isEmpty()) {
-            _uiState.update { it.copy(error = "Select at least one device and one file first.") }
+        if (targets.isEmpty()) {
+            _uiState.update { it.copy(error = "Connect at least one device first.") }
+            return
+        }
+        if (files.isEmpty() && text.isEmpty()) {
+            _uiState.update { it.copy(error = "Attach a file/folder or paste some text first.") }
             return
         }
 
@@ -311,14 +417,21 @@ class OpenAirViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        val sendItems = files.mapNotNull { attachment ->
-            fileUriMap[attachment.id]?.let { uri ->
-                SendItem.UriFile(uri = uri, name = attachment.name)
+        val sendItems = buildList {
+            files.mapNotNullTo(this) { attachment ->
+                fileUriMap[attachment.id]?.let { uri ->
+                    SendItem.UriFile(uri = uri, name = attachment.name)
+                }
+            }
+            if (text.isNotEmpty()) {
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                    .format(java.util.Date())
+                add(SendItem.TextFile(name = "openair-text-$stamp.txt", bytes = text.toByteArray()))
             }
         }
 
         if (sendItems.isEmpty()) {
-            _uiState.update { it.copy(error = "No valid files to send — try attaching again.") }
+            _uiState.update { it.copy(error = "Nothing valid to send — try attaching again.") }
             return
         }
 
@@ -409,6 +522,82 @@ class OpenAirViewModel(app: Application) : AndroidViewModel(app) {
                 progressChannel.close()
             }
         }
+    }
+
+    // ── Received-files history ────────────────────────────────────────────────
+
+    /** Opens a received file in whatever app handles its MIME type. */
+    fun openReceivedFile(file: ReceivedFile) {
+        val ctx = getApplication<Application>().applicationContext
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(Uri.parse(file.mediaUri), file.mimeType)
+            addFlags(
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+            )
+        }
+        try {
+            ctx.startActivity(intent)
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "No app can open ${file.name}") }
+        }
+    }
+
+    /** Clears the history list (files themselves stay on disk / in MediaStore). */
+    fun clearReceivedHistory() {
+        _uiState.update { it.copy(receivedFiles = emptyList()) }
+        persistReceivedHistory(emptyList())
+    }
+
+    private val historyFile: java.io.File
+        get() = java.io.File(getApplication<Application>().filesDir, "received_history.json")
+
+    private fun loadReceivedHistory(): List<ReceivedFile> = try {
+        if (!historyFile.exists()) emptyList()
+        else {
+            val arr = org.json.JSONArray(historyFile.readText())
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                ReceivedFile(
+                    id         = o.optString("id", UUID.randomUUID().toString()),
+                    name       = o.optString("name", "file"),
+                    sizeLabel  = o.optString("sizeLabel", ""),
+                    mediaUri   = o.optString("mediaUri", ""),
+                    mimeType   = o.optString("mimeType", "application/octet-stream"),
+                    receivedAt = o.optLong("receivedAt", 0L),
+                )
+            }
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    private fun persistReceivedHistory(list: List<ReceivedFile>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val arr = org.json.JSONArray()
+                list.forEach { rf ->
+                    arr.put(org.json.JSONObject().apply {
+                        put("id",         rf.id)
+                        put("name",       rf.name)
+                        put("sizeLabel",  rf.sizeLabel)
+                        put("mediaUri",   rf.mediaUri)
+                        put("mimeType",   rf.mimeType)
+                        put("receivedAt", rf.receivedAt)
+                    })
+                }
+                historyFile.writeText(arr.toString())
+            } catch (e: Exception) {
+                android.util.Log.w("OpenAirViewModel", "History persist failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun guessMimeType(fileName: String): String {
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        if (ext.isEmpty()) return "application/octet-stream"
+        return android.webkit.MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(ext) ?: "application/octet-stream"
     }
 
     // ── Error handling ────────────────────────────────────────────────────────

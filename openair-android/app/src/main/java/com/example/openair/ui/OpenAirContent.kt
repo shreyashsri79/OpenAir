@@ -1,6 +1,8 @@
 package com.example.openair.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,8 +20,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -34,7 +45,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -204,17 +217,34 @@ fun OpenAirContent(
                 Spacer(Modifier.height(10.dp))
             }
 
-            // Attach-file button
-            ActionMarkerButton(
-                label           = "+ Attach File",
-                onClick         = callbacks.onAttachFile,
-                modifier        = Modifier.padding(horizontal = 16.dp),
-                backgroundColor = PaperCream,
-                contentColor    = InkBlack,
-                shadowOffsetX   = 3.dp,
-                shadowOffsetY   = 3.dp,
-                fontSize        = 16.sp
-            )
+            // Attach buttons — files (multi-select) and folder (zipped on attach)
+            Row(
+                modifier              = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ActionMarkerButton(
+                    label           = "+ Attach Files",
+                    onClick         = callbacks.onAttachFile,
+                    modifier        = Modifier.weight(1f),
+                    backgroundColor = PaperCream,
+                    contentColor    = InkBlack,
+                    shadowOffsetX   = 3.dp,
+                    shadowOffsetY   = 3.dp,
+                    fontSize        = 16.sp
+                )
+                ActionMarkerButton(
+                    label           = "+ Attach Folder",
+                    onClick         = callbacks.onAttachFolder,
+                    modifier        = Modifier.weight(1f),
+                    backgroundColor = PaperCream,
+                    contentColor    = InkBlack,
+                    shadowOffsetX   = 3.dp,
+                    shadowOffsetY   = 3.dp,
+                    fontSize        = 16.sp
+                )
+            }
 
             Spacer(Modifier.height(12.dp))
 
@@ -261,6 +291,15 @@ fun OpenAirContent(
                         .padding(bottom = 8.dp)
                 )
             }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ── Received files (all-time history) ─────────────────────────────
+            ReceivedFilesSection(
+                files      = state.receivedFiles,
+                onOpenFile = callbacks.onOpenReceivedFile,
+                onClear    = callbacks.onClearReceived,
+            )
         }
 
         // ── Sticky Send button (pinned to bottom) ─────────────────────────────
@@ -306,11 +345,19 @@ private fun TopBar(
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // App name — Permanent Marker for the hand-lettered logo feel
-        Text(
-            text  = "\u2708 OpenAir",
-            style = TextStyle(fontFamily = PermanentMarkerFamily, fontSize = 26.sp, color = InkBlack)
-        )
+        // App logo + name — Permanent Marker for the hand-lettered wordmark feel
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(
+                painter            = painterResource(id = com.example.openair.R.drawable.logo),
+                contentDescription = "OpenAir logo",
+                modifier           = Modifier.size(32.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text  = "OpenAir",
+                style = TextStyle(fontFamily = PermanentMarkerFamily, fontSize = 26.sp, color = InkBlack)
+            )
+        }
         // Device name chip
         Box(
             modifier = Modifier
@@ -409,6 +456,124 @@ private fun SectionHeader(
                 .height(2.dp)
                 .background(InkBlack.copy(alpha = 0.15f))
         )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Received files section
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ReceivedFilesSection(
+    files      : List<com.example.openair.ReceivedFile>,
+    onOpenFile : (com.example.openair.ReceivedFile) -> Unit,
+    onClear    : () -> Unit,
+    modifier   : Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text  = "Received Files",
+                style = TextStyle(fontFamily = PermanentMarkerFamily, fontSize = 18.sp, color = InkBlack)
+            )
+            Spacer(Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(2.dp)
+                    .background(InkBlack.copy(alpha = 0.15f))
+            )
+            if (files.isNotEmpty()) {
+                TextButton(onClick = onClear) {
+                    Text(
+                        text  = "clear",
+                        style = TextStyle(fontFamily = CaveatFamily, fontSize = 15.sp, color = InkFaded)
+                    )
+                }
+            }
+        }
+
+        if (files.isEmpty()) {
+            Text(
+                text     = "Nothing received yet…",
+                style    = TextStyle(fontFamily = CaveatFamily, fontSize = 16.sp, color = InkFaded),
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        } else {
+            Column(
+                modifier            = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Newest first
+                files.asReversed().forEach { file ->
+                    ReceivedFileRow(file = file, onClick = { onOpenFile(file) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReceivedFileRow(
+    file    : com.example.openair.ReceivedFile,
+    onClick : () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val icon = when {
+        file.mimeType.startsWith("image/") -> Icons.Filled.Image
+        file.mimeType.startsWith("video/") -> Icons.Filled.Movie
+        file.mimeType.startsWith("audio/") -> Icons.Filled.MusicNote
+        file.mimeType.startsWith("text/")  -> Icons.Filled.Description
+        file.mimeType == "application/zip" -> Icons.Filled.FolderZip
+        else                               -> Icons.Filled.InsertDriveFile
+    }
+    val timeLabel = remember(file.receivedAt) {
+        if (file.receivedAt <= 0L) ""
+        else java.text.SimpleDateFormat("MMM d · HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(file.receivedAt))
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .inkOffsetShadow(offsetX = 2.dp, offsetY = 2.dp, cornerRadius = 8.dp)
+            .background(PaperWhite, RoundedCornerShape(8.dp))
+            .sketchBorder(strokeWidth = 2.dp, color = InkBlack, cornerRadius = 8.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = null,
+            tint               = OceanDeep,
+            modifier           = Modifier.size(26.dp)
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                text     = file.name,
+                style    = TextStyle(
+                    fontFamily = CaveatFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize   = 17.sp,
+                    color      = InkBlack
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text  = listOf(file.sizeLabel, timeLabel)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · "),
+                style = TextStyle(fontFamily = CaveatFamily, fontSize = 13.sp, color = InkFaded)
+            )
+        }
     }
 }
 

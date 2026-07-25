@@ -79,11 +79,12 @@ class NsdDiscoveryManager(context: Context) {
     fun startScan(
         onStatus: (String) -> Unit,
         onFound:  (Device) -> Unit,
+        onLost:   (String) -> Unit = {},
     ) {
         // Ensure we never register two listeners concurrently.
         stopScan()
 
-        val listener = buildDiscoveryListener(onStatus, onFound)
+        val listener = buildDiscoveryListener(onStatus, onFound, onLost)
         discoveryListener = listener
 
         nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
@@ -120,6 +121,7 @@ class NsdDiscoveryManager(context: Context) {
     private fun buildDiscoveryListener(
         onStatus: (String) -> Unit,
         onFound:  (Device) -> Unit,
+        onLost:   (String) -> Unit,
     ): NsdManager.DiscoveryListener = object : NsdManager.DiscoveryListener {
 
         // ── Discovery lifecycle ───────────────────────────────────────────
@@ -162,9 +164,22 @@ class NsdDiscoveryManager(context: Context) {
         }
 
         override fun onServiceLost(service: NsdServiceInfo) {
-            // Peer went offline — notify callers if needed in future.
             Log.d(TAG, "onServiceLost: ${service.serviceName}")
+            onLost(service.serviceName)
         }
+    }
+
+    /**
+     * True when [address] belongs to one of this device's own network
+     * interfaces — i.e. the discovered service is our own receiver.
+     */
+    private fun isLocalAddress(address: Inet4Address): Boolean = try {
+        java.net.NetworkInterface.getNetworkInterfaces().asSequence()
+            .flatMap { it.inetAddresses.asSequence() }
+            .any { it == address }
+    } catch (e: Exception) {
+        Log.w(TAG, "Local-address check failed: ${e.message}")
+        false
     }
 
     /**
@@ -192,6 +207,12 @@ class NsdDiscoveryManager(context: Context) {
             val hostAddress = inet4.hostAddress
             if (hostAddress.isNullOrBlank()) {
                 Log.w(TAG, "Skipping ${resolvedService.serviceName}: hostAddress is blank.")
+                return
+            }
+
+            // Never surface this device's own receiver in the peer list.
+            if (isLocalAddress(inet4)) {
+                Log.d(TAG, "Skipping ${resolvedService.serviceName}: local (self) address.")
                 return
             }
 
