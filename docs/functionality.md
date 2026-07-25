@@ -22,6 +22,28 @@ Purpose: Desktop GUI (Linux/macOS/Windows) wrapping the Go transfer engine.
 - `internal/sender/sender.go` — send-side logic used by the GUI.
 - `internal/sender/discover.go` — peer discovery for GUI sender (replaces old `discoverAndroid.go`, removed — see decisions log if a rationale entry exists, otherwise log why on next touch).
 
+## oabench (Go) — v2.0 transport spike
+Purpose: measure whether a single QUIC connection with N streams can match v1.0's N-parallel-TCP engine, and at what CPU cost. Exists to settle PRD risk K1 / ADR-1 **before** the v2 stack is built on QUIC. Own Go module (`github.com/shreyashsri79/openair/oabench`); does not import or affect `openair-gui`.
+- `main.go` — `serve` / `send` subcommands, flag parsing, stream-count sweep, median-of-N.
+- `bench/framing.go` — v1.0's 12-byte chunk header (`int64` offset + `int32` size, little-endian), role tags, session preamble. Deliberately byte-identical to v1.0 so the measurement isolates transport, not framing.
+- `bench/plan.go` — lock-free chunk distribution (atomic counter replaces v1.0's jobs channel) and payload generation.
+- `bench/transfer.go` — `Config`, shared send loop, and the sink (discard, or `WriteAt` reconstruction).
+- `bench/tcp.go` — v1.0-shaped baseline: N independent TCP connections.
+- `bench/quic.go` — v2.0-shaped candidate: one QUIC connection, N streams, per HLD "one connection per peer".
+- `bench/tlsutil.go` — Ed25519 identity, self-signed cert, `VerifyPeerCertificate` pinning. Doubles as the ADR-2 dry run.
+- `bench/cpu_linux.go` / `cpu_other.go` — `getrusage` CPU accounting; no-op off Linux.
+- `netem/lab.sh` — runs a command in an unprivileged user+network namespace with `tc netem` applied to a 1500-MTU loopback. No root needed.
+- `netem/run-one.sh` — one profile's sweep: TCP, then QUIC with GSO on, then GSO off.
+- `netem/matrix.sh`, `netem/report.sh` — full matrix runner and the gate pivot table.
+
+Control flow (both transports): sender opens a control channel, sends `preamble{total, streams, chunk}`, waits for a go-ahead, then opens N data channels. Timer starts once all channels are up and stops when the **receiver** acks completion on the control channel — stopping at the last `Write` would measure the kernel send buffer, not delivery. On QUIC the receiver must drain the control stream to EOF before closing the connection, because `CONNECTION_CLOSE` preempts undelivered stream data and would race the ack away.
+
+Sharp edges:
+- `bench/tlsutil.go` uses a **fixed Ed25519 seed** so the client can pin the server with no out-of-band exchange. Spike only; must not reach the daemon.
+- Timing is only meaningful under `netem/lab.sh`. Unshaped loopback reports ~38 Gb/s for TCP.
+- Sender, receiver and netem share one CPU, so results are pessimistic for the CPU-hungrier transport (QUIC) and become CPU-bound rather than link-bound at gigabit rates. Two-machine runs are needed before ADR-1 is settled.
+- `QUIC_GO_DISABLE_GSO=1` is the Linux proxy for the Windows send path; it is a lower bound, not a prediction.
+
 ## Removed modules
 `openair-cli`, `openair-receiver`, `openair-sender` deleted — see `docs/decisions.md` D-2. Project scope is now gui + android only. `openair-gui/internal/sender` and `internal/receiver` are the sole Go implementation.
 

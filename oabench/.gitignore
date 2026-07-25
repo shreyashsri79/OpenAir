@@ -1,0 +1,5 @@
+# built binary
+/oabench
+
+# live matrix output; dated snapshots backing a decision are committed instead
+netem/results.jsonl
