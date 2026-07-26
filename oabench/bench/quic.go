@@ -2,6 +2,7 @@ package bench
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -39,6 +40,52 @@ func quicConfig(cfg Config) *quic.Config {
 		InitialConnectionReceiveWindow: connWnd,
 		MaxConnectionReceiveWindow:     connWnd,
 		MaxIncomingStreams:             1024,
+		EnableDatagrams:                true,
+	}
+}
+
+// datagramPing measures round trip over RFC 9221 datagrams. Datagrams skip
+// stream flow control but are still paced by the connection's congestion
+// controller, which is exactly why this number matters: it shows what a
+// standing queue costs traffic that is supposed to be latency-sensitive.
+func datagramPing(conn *quic.Conn) pingFunc {
+	buf := make([]byte, probePayload)
+	var seq uint64
+	return func() (time.Duration, error) {
+		seq++
+		binary.LittleEndian.PutUint64(buf, seq)
+		start := time.Now()
+		if err := conn.SendDatagram(buf); err != nil {
+			return 0, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+		defer cancel()
+		for {
+			data, err := conn.ReceiveDatagram(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					return 0, errProbeLost
+				}
+				return 0, err
+			}
+			// A late echo from an exchange that already timed out must not be
+			// credited to this one; keep reading until the sequence matches.
+			if len(data) >= probePayload && binary.LittleEndian.Uint64(data) == seq {
+				return time.Since(start), nil
+			}
+		}
+	}
+}
+
+func echoDatagrams(conn *quic.Conn) {
+	for {
+		data, err := conn.ReceiveDatagram(context.Background())
+		if err != nil {
+			return
+		}
+		if err := conn.SendDatagram(data); err != nil {
+			return
+		}
 	}
 }
 
@@ -100,6 +147,19 @@ func serveQUICSession(conn *quic.Conn, sinkPath string) error {
 		return err
 	}
 	defer sk.close()
+
+	if p.probing() {
+		ping, err := conn.AcceptStream(ctx)
+		if err != nil {
+			return fmt.Errorf("accept ping stream: %w", err)
+		}
+		var r [1]byte
+		if _, err := io.ReadFull(ping, r[:]); err != nil || r[0] != rolePing {
+			return fmt.Errorf("expected ping stream, got role %d", r[0])
+		}
+		go echoStream(ping)
+		go echoDatagrams(conn)
+	}
 
 	if _, err := ctrl.Write([]byte{1}); err != nil {
 		return err
@@ -174,10 +234,24 @@ func RunQUIC(cfg Config) *Result {
 		TotalBytes: cfg.TotalBytes,
 		Streams:    int32(cfg.Streams),
 		ChunkBytes: int32(cfg.ChunkBytes),
+		Flags:      probeFlag(cfg.Probe),
 	}); err != nil {
 		res.Error = err.Error()
 		return res
 	}
+	var pingStream *quic.Stream
+	if cfg.Probe {
+		pingStream, err = conn.OpenStreamSync(ctx)
+		if err != nil {
+			res.Error = fmt.Sprintf("open ping stream: %v", err)
+			return res
+		}
+		if _, err := pingStream.Write([]byte{rolePing}); err != nil {
+			res.Error = err.Error()
+			return res
+		}
+	}
+
 	var one [1]byte
 	if _, err := io.ReadFull(ctrl, one[:]); err != nil {
 		res.Error = fmt.Sprintf("await go: %v", err)
@@ -199,8 +273,19 @@ func RunQUIC(cfg Config) *Result {
 	}
 	res.SetupSec = time.Since(setupStart).Seconds()
 
+	var pings map[string]pingFunc
+	if cfg.Probe {
+		pings = map[string]pingFunc{
+			"quic-stream":   streamPing(pingStream),
+			"quic-datagram": datagramPing(conn),
+		}
+		res.Probes = append(res.Probes, probeIdle(pings)...)
+	}
+
 	plan := newChunkPlan(cfg.TotalBytes, cfg.ChunkBytes)
 	src := payload(int(cfg.ChunkBytes))
+
+	busyStop, busyDone := startBusyProbes(pings)
 
 	cpuStart := cpuSeconds()
 	transferStart := time.Now()
@@ -232,6 +317,7 @@ func RunQUIC(cfg Config) *Result {
 	}
 	res.TransferSec = time.Since(transferStart).Seconds()
 	res.finalize(cpuSeconds() - cpuStart)
+	res.Probes = append(res.Probes, finishBusyProbes(busyStop, busyDone)...)
 
 	ctrl.Close() // releases the receiver, which is draining this stream to EOF
 	return res

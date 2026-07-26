@@ -6,6 +6,7 @@
 set -uo pipefail
 
 BIN=$1; PROFILE=$2; SIZE=$3; STREAMS=$4; RUNS=$5
+# PROBE=1 adds the interactive-latency probe to every sweep (D-17).
 ADDR=127.0.0.1:9100
 export QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING=1
 
@@ -21,7 +22,7 @@ sweep() {
 
   echo "== $PROFILE / $transport / gso=$gso_label ==" >&2
   "$BIN" send -transport "$transport" -addr "$ADDR" \
-    -size "$SIZE" -streams "$STREAMS" -runs "$RUNS" -profile "$PROFILE"
+    -size "$SIZE" -streams "$STREAMS" -runs "$RUNS" -profile "$PROFILE" ${PROBE:+-probe}
   local rc=$?
   if [[ $rc -ne 0 ]]; then
     echo "!! $PROFILE / $transport / gso=$gso_label failed (rc=$rc)" >&2

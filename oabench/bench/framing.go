@@ -16,7 +16,12 @@ const HeaderSize = 12
 const (
 	roleControl byte = 0
 	roleData    byte = 1
+	rolePing    byte = 2
 )
+
+// preambleFlagProbe asks the receiver to stand up the latency probe echo paths
+// in addition to the bulk sink.
+const preambleFlagProbe uint32 = 1 << 0
 
 // preamble is what the sender declares on the control channel before any bulk
 // data moves, so the receiver knows when the transfer is complete.
@@ -24,19 +29,30 @@ type preamble struct {
 	TotalBytes int64
 	Streams    int32
 	ChunkBytes int32
+	Flags      uint32
+}
+
+func (p preamble) probing() bool { return p.Flags&preambleFlagProbe != 0 }
+
+func probeFlag(on bool) uint32 {
+	if on {
+		return preambleFlagProbe
+	}
+	return 0
 }
 
 func writePreamble(w io.Writer, p preamble) error {
-	var b [16]byte
+	var b [20]byte
 	binary.LittleEndian.PutUint64(b[0:8], uint64(p.TotalBytes))
 	binary.LittleEndian.PutUint32(b[8:12], uint32(p.Streams))
 	binary.LittleEndian.PutUint32(b[12:16], uint32(p.ChunkBytes))
+	binary.LittleEndian.PutUint32(b[16:20], p.Flags)
 	_, err := w.Write(b[:])
 	return err
 }
 
 func readPreamble(r io.Reader) (preamble, error) {
-	var b [16]byte
+	var b [20]byte
 	if _, err := io.ReadFull(r, b[:]); err != nil {
 		return preamble{}, err
 	}
@@ -44,6 +60,7 @@ func readPreamble(r io.Reader) (preamble, error) {
 		TotalBytes: int64(binary.LittleEndian.Uint64(b[0:8])),
 		Streams:    int32(binary.LittleEndian.Uint32(b[8:12])),
 		ChunkBytes: int32(binary.LittleEndian.Uint32(b[12:16])),
+		Flags:      binary.LittleEndian.Uint32(b[16:20]),
 	}, nil
 }
 

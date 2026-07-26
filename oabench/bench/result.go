@@ -26,6 +26,10 @@ type Result struct {
 	SenderCPUSec float64 `json:"sender_cpu_sec"`
 	CPUSecPerGiB float64 `json:"cpu_sec_per_gib"`
 
+	// Probes is empty unless -probe was set. Idle and busy entries appear in
+	// pairs so the inflation caused by bulk is readable without another run.
+	Probes []ProbeStats `json:"probes,omitempty"`
+
 	GSO     string `json:"gso"`               // "on" | "off" | "n/a"
 	Profile string `json:"profile,omitempty"` // netem profile label
 	Label   string `json:"label,omitempty"`
@@ -61,4 +65,10 @@ func (r *Result) Summarize(w io.Writer) {
 		"  %-4s streams=%-3d chunk=%-7s gso=%-3s  %8.1f Mb/s  transfer=%6.2fs setup=%5.3fs  cpu=%.2fs/GiB\n",
 		r.Transport, r.Streams, HumanBytes(r.ChunkBytes), r.GSO,
 		r.Mbps, r.TransferSec, r.SetupSec, r.CPUSecPerGiB)
+
+	for _, p := range r.Probes {
+		fmt.Fprintf(w,
+			"       %-14s %-4s  p50=%6.2fms p90=%6.2fms p99=%6.2fms max=%7.2fms  n=%d lost=%d\n",
+			p.Kind, p.Phase, p.P50Ms, p.P90Ms, p.P99Ms, p.MaxMs, p.Samples, p.Lost)
+	}
 }

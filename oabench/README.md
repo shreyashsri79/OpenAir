@@ -35,6 +35,7 @@ Results are JSON Lines on stdout, human summary on stderr.
 | `mbps` | Application goodput. The headline number. |
 | `cpu_sec_per_gib` | **The number that predicts Windows.** QUIC is userspace: it pays per-packet crypto and syscall costs the kernel absorbs for TCP. Matching throughput while burning 10x the CPU means the wall hasn't been hit yet, not that there isn't one. |
 | `setup_sec` | QUIC's 1-RTT handshake vs TCP's 3-way plus N dials. Noise for bulk transfer, but it's the whole cost for a clipboard push. |
+| `probes[]` | With `-probe`: interactive round-trip percentiles, sampled idle then during the transfer. The idle row is the same-run baseline; the busy row is what a user feels while a file is moving. Requires reading the pair, never the busy number alone. |
 | `transfer_sec` | First byte sent until the receiver acknowledges the last byte. |
 
 ## What Linux alone can and cannot answer
@@ -130,6 +131,12 @@ and has no route off it, so nothing here touches real hardware. Verify with:
 ./netem/lab.sh wifi-5g -- ip -brief link show   # only lo
 ./netem/lab.sh wifi-5g -- ip route show         # empty
 ```
+
+Queue depth is derived from the bandwidth-delay product — `BUFFER_BDP` multiples,
+default 4, which is consumer-typical. Set `BUFFER_BDP=1` for a shallow-buffered
+link or a large value to study bufferbloat on purpose. This matters: an earlier
+revision used a flat 100000-packet queue, about 150 MB, and latency-under-load
+measured the lab rather than the transport.
 
 | Profile | Models this link | Rate | RTT | Loss |
 |---|---|---|---|---|

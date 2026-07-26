@@ -50,6 +50,22 @@ func serveTCPSession(ln net.Listener, ctrl net.Conn, sinkPath string) error {
 	}
 	defer sk.close()
 
+	if p.probing() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return err
+		}
+		var role [1]byte
+		if _, err := io.ReadFull(conn, role[:]); err != nil || role[0] != rolePing {
+			conn.Close()
+			return fmt.Errorf("expected ping connection, got role %d", role[0])
+		}
+		go func() {
+			defer conn.Close()
+			echoStream(conn)
+		}()
+	}
+
 	// Tell the sender to dial its data connections. Gating on this means a
 	// single accept loop can attribute connections without racing.
 	if _, err := ctrl.Write([]byte{1}); err != nil {
@@ -114,10 +130,29 @@ func RunTCP(cfg Config) *Result {
 		TotalBytes: cfg.TotalBytes,
 		Streams:    int32(cfg.Streams),
 		ChunkBytes: int32(cfg.ChunkBytes),
+		Flags:      probeFlag(cfg.Probe),
 	}); err != nil {
 		res.Error = err.Error()
 		return res
 	}
+
+	// The probe rides its own connection here, mirroring v1.0's architecture
+	// where control never shared a socket with bulk. That asymmetry against
+	// QUIC's shared connection is the comparison, not a flaw in it.
+	var pingConn net.Conn
+	if cfg.Probe {
+		pingConn, err = net.Dial("tcp", cfg.Addr)
+		if err != nil {
+			res.Error = fmt.Sprintf("dial ping: %v", err)
+			return res
+		}
+		defer pingConn.Close()
+		if _, err := pingConn.Write([]byte{rolePing}); err != nil {
+			res.Error = err.Error()
+			return res
+		}
+	}
+
 	var one [1]byte
 	if _, err := io.ReadFull(ctrl, one[:]); err != nil {
 		res.Error = fmt.Sprintf("await go: %v", err)
@@ -144,8 +179,16 @@ func RunTCP(cfg Config) *Result {
 	}
 	res.SetupSec = time.Since(setupStart).Seconds()
 
+	var pings map[string]pingFunc
+	if cfg.Probe {
+		pings = map[string]pingFunc{"tcp-sepconn": streamPing(pingConn)}
+		res.Probes = append(res.Probes, probeIdle(pings)...)
+	}
+
 	plan := newChunkPlan(cfg.TotalBytes, cfg.ChunkBytes)
 	src := payload(int(cfg.ChunkBytes))
+
+	busyStop, busyDone := startBusyProbes(pings)
 
 	cpuStart := cpuSeconds()
 	transferStart := time.Now()
@@ -182,5 +225,6 @@ func RunTCP(cfg Config) *Result {
 	}
 	res.TransferSec = time.Since(transferStart).Seconds()
 	res.finalize(cpuSeconds() - cpuStart)
+	res.Probes = append(res.Probes, finishBusyProbes(busyStop, busyDone)...)
 	return res
 }

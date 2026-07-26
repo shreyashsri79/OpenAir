@@ -31,18 +31,20 @@ Purpose: measure whether a single QUIC connection with N streams can match v1.0'
 - `bench/tcp.go` — v1.0-shaped baseline: N independent TCP connections.
 - `bench/quic.go` — v2.0-shaped candidate: one QUIC connection, N streams, per HLD "one connection per peer".
 - `bench/tlsutil.go` — Ed25519 identity, self-signed cert, `VerifyPeerCertificate` pinning. Doubles as the ADR-2 dry run.
+- `bench/latency.go` — interactive-latency probe: request/response ping sampled idle then during the transfer, reported as percentiles. `probeIdle` / `startBusyProbes` / `finishBusyProbes` orchestrate the two phases; `streamPing` and `echoStream` are transport-agnostic, `datagramPing` and `echoDatagrams` live in `quic.go`.
 - `bench/cpu_linux.go` / `cpu_other.go` — `getrusage` CPU accounting; no-op off Linux.
 - `netem/lab.sh` — runs a command in an unprivileged user+network namespace with `tc netem` applied to a 1500-MTU loopback. No root needed.
 - `netem/run-one.sh` — one profile's sweep: TCP, then QUIC with GSO on, then GSO off.
 - `netem/matrix.sh`, `netem/report.sh` — full matrix runner and the gate pivot table.
 
-Control flow (both transports): sender opens a control channel, sends `preamble{total, streams, chunk}`, waits for a go-ahead, then opens N data channels. Timer starts once all channels are up and stops when the **receiver** acks completion on the control channel — stopping at the last `Write` would measure the kernel send buffer, not delivery. On QUIC the receiver must drain the control stream to EOF before closing the connection, because `CONNECTION_CLOSE` preempts undelivered stream data and would race the ack away.
+Control flow (both transports): sender opens a control channel, sends `preamble{total, streams, chunk, flags}`, waits for a go-ahead, then opens N data channels. With `-probe`, a ping channel is opened *before* the go-ahead — a QUIC stream on the same connection as bulk, or for TCP a separate connection, mirroring v1.0's architecture. That asymmetry is the measurement, not an oversight (D-17). Timer starts once all channels are up and stops when the **receiver** acks completion on the control channel — stopping at the last `Write` would measure the kernel send buffer, not delivery. On QUIC the receiver must drain the control stream to EOF before closing the connection, because `CONNECTION_CLOSE` preempts undelivered stream data and would race the ack away.
 
 Sharp edges:
 - `bench/tlsutil.go` uses a **fixed Ed25519 seed** so the client can pin the server with no out-of-band exchange. Spike only; must not reach the daemon.
 - Timing is only meaningful under `netem/lab.sh`. Unshaped loopback reports ~38 Gb/s for TCP.
 - Sender, receiver and netem share one CPU, so results are pessimistic for the CPU-hungrier transport (QUIC) and become CPU-bound rather than link-bound at gigabit rates. Two-machine runs are needed before ADR-1 is settled.
-- `QUIC_GO_DISABLE_GSO=1` is the Linux proxy for the Windows send path; it is a lower bound, not a prediction.
+- `QUIC_GO_DISABLE_GSO=1` was originally used as a Linux proxy for the Windows send path. Per D-13 it is not a proxy: quic-go's `UDP_SEGMENT` support is Linux-only by construction, so GSO-off *is* Windows and macOS behaviour.
+- netem queue depth is derived from the bandwidth-delay product, `BUFFER_BDP` multiples, default 4. It was previously a flat 100000 packets, which was extreme bufferbloat and made latency-under-load meaningless; see D-17. Always state the buffer depth when quoting latency figures.
 
 ## Removed modules
 `openair-cli`, `openair-receiver`, `openair-sender` deleted — see `docs/decision-tree.md` D-2. Project scope is now gui + android only. `openair-gui/internal/sender` and `internal/receiver` are the sole Go implementation.

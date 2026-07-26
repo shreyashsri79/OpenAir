@@ -47,7 +47,7 @@ func usage() {
 
   oabench serve -transport tcp|quic [-addr :9100] [-sink PATH]
   oabench send  -transport tcp|quic [-addr host:9100] [-size 1GiB]
-                [-streams 1,2,4,8] [-chunk 1MiB] [-runs 3] [-profile NAME]
+                [-streams 1,2,4,8] [-chunk 1MiB] [-runs 3] [-profile NAME] [-probe]
 
 Results are one JSON object per line on stdout; a human summary goes to stderr.
 
@@ -84,6 +84,7 @@ func send(args []string) {
 	chunk := fs.String("chunk", "1MiB", "chunk size (v1.0 clamps to 256KiB..4MiB)")
 	streamList := fs.String("streams", "8", "comma-separated stream counts to sweep")
 	runs := fs.Int("runs", 3, "runs per stream count; the median is reported")
+	probe := fs.Bool("probe", false, "measure interactive latency idle and during the transfer")
 	profile := fs.String("profile", "", "netem profile label recorded in the result")
 	label := fs.String("label", "", "free-form label recorded in the result")
 	streamWnd := fs.String("stream-window", "16MiB", "QUIC per-stream flow control window")
@@ -118,7 +119,7 @@ func send(args []string) {
 			cfg := bench.Config{
 				Addr: *addr, Streams: n,
 				ChunkBytes: chunkBytes, TotalBytes: totalBytes,
-				Profile: *profile, Label: *label,
+				Profile: *profile, Label: *label, Probe: *probe,
 				StreamWindow: uint64(sw), ConnWindow: uint64(cw),
 			}
 			var res *bench.Result

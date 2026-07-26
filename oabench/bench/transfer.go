@@ -24,6 +24,13 @@ type Config struct {
 	// under test is transport cost, not disk.
 	SinkPath string
 
+	// Probe runs a latency probe alongside the bulk transfer: a small
+	// request/response ping on a stream, and on QUIC also over datagrams,
+	// sampled before and during the transfer. It answers what a congestion
+	// controller costs interactive traffic sharing the connection -- the
+	// question D-16 raises about BBRv1's standing queue.
+	Probe bool
+
 	// QUIC flow-control windows. Defaults are deliberately generous: quic-go's
 	// stock windows throttle a high bandwidth-delay-product path, and a run
 	// that measures default flow control instead of the transport would answer
