@@ -35,14 +35,24 @@ Measurements: 192 MiB, median of 2 runs, chunk 1 MiB, single machine.
 
 **All network conditions are emulated**, not measured over real hardware. `netem/lab.sh` applies `tc netem` (rate limit, fixed delay, random loss) to an isolated loopback inside an unprivileged network namespace containing no interface but `lo` and no route off it. No physical NIC, WiFi radio, hotspot or WAN link was involved in any row below. The profile names say which real-world link each preset is *modelling*:
 
-| profile | models this link | rate | RTT | loss | TCP best | QUIC GSO on | QUIC GSO off |
-|---|---|---|---|---|---|---|---|
-| `lan-1g` | wired gigabit Ethernet between two desktops | 1 Gb/s | 1 ms | 0% | 952 | 660 | 446 |
-| `hotspot` | phone tethering / device-to-device AP, no infrastructure hop — v1.0's 477 Mb/s case | 600 Mb/s | 4 ms | 0.05% | 568 | 559 | 179 |
-| `wifi-5g` | 5 GHz WiFi through a home access point — v1.0's 148 Mb/s case | 200 Mb/s | 6 ms | 0.1% | 188 | 185 | 93 |
-| `wan-relay` | cross-network hop via a VPS relay, both peers behind NAT (PRD R7/R8) | 100 Mb/s | 80 ms | 0.5% | 27.4 | 5.5 | 3.3 |
+|  | `lan-1g` | `hotspot` | `wifi-5g` | `wan-relay` |
+|---|---|---|---|---|
+| models this link | wired gigabit Ethernet | phone tethering / device-to-device AP | 5 GHz WiFi via home AP | VPS relay, both peers behind NAT |
+| rate | 1 Gb/s | 600 Mb/s | 200 Mb/s | 100 Mb/s |
+| RTT | 1 ms | 4 ms | 6 ms | 80 ms |
+| loss | 0% | 0.05% | 0.1% | 0.5% |
+| TCP best | 952 | 568 | 188 | 27.4 |
+| QUIC GSO on | 660 | 559 | 185 | 5.5 |
+| QUIC GSO off | 446 | 179 | 93 | 3.3 |
 
-Throughput in Mb/s. A fifth profile, `cgnat-punch` (50 Mb/s / 120 ms / 1%, modelling mobile data behind carrier-grade NAT), is defined in `netem/lab.sh` but was not run for this entry.
+Throughput in Mb/s. Notes on each profile:
+
+- `lan-1g` — wired gigabit Ethernet between two desktops.
+- `hotspot` — phone tethering / device-to-device AP, no infrastructure hop; v1.0's 477 Mb/s case.
+- `wifi-5g` — 5 GHz WiFi through a home access point; v1.0's 148 Mb/s case.
+- `wan-relay` — cross-network hop via a VPS relay, both peers behind NAT (PRD R7/R8).
+
+A fifth profile, `cgnat-punch` (50 Mb/s / 120 ms / 1%, modelling mobile data behind carrier-grade NAT), is defined in `netem/lab.sh` but was not run for this entry.
 
 Emulation fidelity: netem is a token bucket plus fixed delay and uniform random loss. Real WiFi has contention, rate adaptation and bursty loss; a real relay has jitter and competing traffic. Absolute figures are therefore indicative of the modelled link, not predictive of it. What the emulation does support is the *comparison*: TCP and QUIC ran back-to-back under byte-identical conditions with the same framing and chunk size, so any inaccuracy in the model applies equally to both.
 
@@ -126,3 +136,37 @@ Decision (proposed): None yet. Options, in the order they should be *tested* —
   (c) PRD K1's own escape hatch: parallel-TCP bulk mode reusing v1.0's engine with QUIC for control. Known to work, since it is v1.0, but it means two transports, two NAT stories, and TCP hole punching is materially harder than UDP.
 Alternatives considered: Accept degraded throughput on relayed paths (rejected — PRD R8 requires parity across paths and M4 targets seek under 3 s over a relayed connection; 5.5 Mb/s does not stream video). Abandon QUIC entirely (rejected — see D-6; QUIC wins per flow and carries the control plane well).
 Consequences: Blocks the `files` capability and couples to D-9, since whether bulk shares the media connection changes the datagram calculus. Whichever option wins, HLD principle #1 needs an explicitly stated exception or an explicit reaffirmation. The deciding experiment is a congestion-control swap plus a rerun of the `wan-relay` profile in `oabench`.
+
+## D-13: Multiplexing helps neither transport on clean links; QUIC degrades past two streams; GSO is Linux-only by construction
+Date: 2026-07-26
+Status: accepted (evidence entry; extends D-4, changes no decision)
+Context: D-4 reported one "best" throughput figure per profile and broke out stream scaling only for `wan-relay`. That collapsed away the comparison the whole spike was built to make — multiplexed QUIC with GSO enabled against v1.0's multiplexed TCP, at matched stream counts, on every profile. The data existed in `oabench/netem/results-2026-07-25.jsonl` from the original run and was simply not surfaced. This entry publishes it, and adds one finding obtained by reading quic-go rather than by measurement.
+
+Full matrix, Mb/s, by stream/connection count. Same run as D-4 (192 MiB, median of 2, 1 MiB chunks, single machine, emulated conditions per D-4's fidelity note):
+
+| profile | config | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|---|
+| `lan-1g` | TCP | 933.8 | 950.2 | 952.8 | 952.3 |
+| | QUIC GSO on | 645.2 | 660.6 | 626.2 | 507.0 |
+| | QUIC GSO off | 303.3 | 419.7 | 446.8 | 424.0 |
+| `hotspot` | TCP | 554.6 | 562.7 | 565.0 | 568.3 |
+| | QUIC GSO on | 505.2 | 559.8 | 537.8 | 446.7 |
+| | QUIC GSO off | 159.4 | 179.2 | 178.3 | 163.7 |
+| `wifi-5g` | TCP | 188.7 | 188.0 | 188.1 | 187.2 |
+| | QUIC GSO on | 165.9 | 185.4 | 175.3 | 180.0 |
+| | QUIC GSO off | 91.1 | 92.3 | 91.7 | 93.9 |
+| `wan-relay` | TCP | 3.7 | 6.9 | 14.6 | 27.3 |
+| | QUIC GSO on | 5.5 | 5.5 | 5.2 | 5.6 |
+| | QUIC GSO off | 3.3 | 3.2 | 3.3 | 3.3 |
+
+Findings:
+
+1. **On clean links, multiplexing buys nothing — for either transport.** A single TCP connection already saturates every lossless profile: 933.8 of 952.3 on `lan-1g`, 554.6 of 568.3 on `hotspot`, 188.7 on `wifi-5g` where more connections make it marginally *worse*. v1.0's parallel-connection trick is not a general throughput mechanism; it is specifically a loss-and-latency mechanism. This reframes v1.0's headline result: the 5–10x it reports came from links where a single flow was being held back, not from parallelism being inherently faster.
+
+2. **Multiplexing never helps QUIC, and hurts it past two streams.** GSO-on peaks at two streams on every profile and then declines — `lan-1g` 660.6 down to 507.0, `hotspot` 559.8 down to 446.7. Extra streams add scheduling and per-stream bookkeeping against one congestion window and one sender loop, so they cost without buying. Practical consequence: if QUIC carries bulk, the stream count should be about two, not the eight v1.0 uses. D-12's option (a) must therefore be read as multiple *connections*, not more streams — more streams is already measured and does not work.
+
+3. **TCP's advantage exists only under loss, and only through parallelism.** `wan-relay` is the sole profile where the transports diverge on scaling: TCP 3.7 to 27.3 near-linearly, QUIC flat at ~5.5. Per single flow QUIC wins there (5.5 against 3.7). Restated: QUIC is the better protocol per flow and loses solely because it cannot be run N-up inside one connection.
+
+4. **GSO is Linux-only by construction, so the "GSO off" row is what Windows and macOS get — permanently.** Established by reading quic-go v0.61, not by measurement: `isGSOEnabled` returns a hardcoded `false` in `sys_conn_helper_darwin.go` and `sys_conn_helper_freebsd.go`, and `appendUDPSegmentSizeMsg` is a no-op stub in `sys_conn_helper_nonlinux.go`, which is what Windows compiles against. Only `sys_conn_helper_linux.go` implements `UDP_SEGMENT`. This upgrades PRD risk K1 from "a risk to be measured on a Windows machine" to a property of the library: on Windows and macOS, QUIC bulk throughput is the GSO-off row — 93 of TCP's 188 on `wifi-5g`, 179 of 568 on `hotspot`, 446 of 952 on `lan-1g`.
+
+Consequences: No decision changes. D-12's framing is refined — its option (a) is multiple connections, since additional streams are now measured as counterproductive, and its BBR option (b) addresses finding 3 but not finding 4, which no congestion controller can fix. Finding 4 is a direct problem for PRD G1's "Windows and Linux and Android are all first-class, with parity as the bar", and should be weighed in D-12 alongside throughput: options (a) and (b) both leave Windows on the degraded send path, whereas option (c), parallel TCP for bulk, is the only one that does not. The clean-link QUIC shortfall in this table is still subject to D-4's co-location caveat and may narrow on two real machines; findings 1, 2 and 4 do not depend on that caveat.
