@@ -45,7 +45,7 @@ Sharp edges:
 - `QUIC_GO_DISABLE_GSO=1` is the Linux proxy for the Windows send path; it is a lower bound, not a prediction.
 
 ## Removed modules
-`openair-cli`, `openair-receiver`, `openair-sender` deleted — see `docs/decisions.md` D-2. Project scope is now gui + android only. `openair-gui/internal/sender` and `internal/receiver` are the sole Go implementation.
+`openair-cli`, `openair-receiver`, `openair-sender` deleted — see `docs/decision-tree.md` D-2. Project scope is now gui + android only. `openair-gui/internal/sender` and `internal/receiver` are the sole Go implementation.
 
 ## Sharp edges / open questions (fill in as discovered)
 - Chunk wire format (offset/size/data framing) and handshake message format are described at a high level in README but not yet pinned down file-by-file here — next agent touching the protocol should fill this in from `openair-gui/internal/sender` and `internal/receiver`.

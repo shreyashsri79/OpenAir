@@ -2,9 +2,9 @@
 
 Rules for any AI agent (Claude, Codex, Copilot, etc.) working in this repo. Multiple agents may work on this codebase concurrently — these rules exist to keep them from stepping on each other and to keep institutional knowledge in the repo instead of in chat history.
 
-## 1. `docs/decisions.md` — decision log
+## 1. `docs/decision-tree.md` — decision tree and log
 
-Maintain `docs/decisions.md` as an append-only log of decisions and reasoning, not just outcomes. Lightweight ADR (Architecture Decision Record) style, industry standard for this:
+Maintain `docs/decision-tree.md` as an append-only log of decisions and reasoning, not just outcomes. Lightweight ADR (Architecture Decision Record) style, industry standard for this. The file opens with Mermaid decision trees and a status table that index the entries; the entries themselves are the normative record:
 
 ```
 ## D-<n>: <short title>
@@ -21,6 +21,7 @@ Rules:
 - One entry per real decision (architecture, protocol, dependency choice, tradeoff), not every commit.
 - Number sequentially, never reuse `D-<n>`.
 - Write it *before or during* the change, not reconstructed after the fact from memory.
+- Update the Mermaid trees and the status table at the top of the file in the same commit as the entry. An index that silently disagrees with the entries it indexes is worse than no index.
 
 ## 2. `docs/functionality.md` — code map
 
@@ -36,11 +37,11 @@ Update this file whenever you add/move/rename a file, change a protocol/format, 
 
 ## 3. Concurrent-agent hygiene
 
-- Before starting work, read `docs/decisions.md` and the relevant section of `docs/functionality.md` for context already established.
+- Before starting work, read `docs/decision-tree.md` and the relevant section of `docs/functionality.md` for context already established.
 - Claim scope narrowly: touch only the module(s) your task requires. If two agents need the same file, that's a signal to sequence, not race.
-- Never revert or silently overwrite another agent's `docs/decisions.md` entry or `docs/functionality.md` section — if it looks wrong or stale, append a correction/supersede, don't erase.
+- Never revert or silently overwrite another agent's `docs/decision-tree.md` entry or `docs/functionality.md` section — if it looks wrong or stale, append a correction/supersede, don't erase.
 - Commit docs updates in the same commit as the code change they describe, not batched separately later.
-- If a decision affects another module you didn't touch, still log it in `docs/decisions.md` — the log is shared, not per-agent.
+- If a decision affects another module you didn't touch, still log it in `docs/decision-tree.md` — the log is shared, not per-agent.
 
 ## 4. Work on `main` — no agent branches, no worktrees
 

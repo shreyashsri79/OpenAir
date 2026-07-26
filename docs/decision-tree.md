@@ -1,6 +1,122 @@
-# Decision Log
+# Decision Tree
 
-Append-only. See AGENTS.md for format and rules. Do not delete or rewrite past entries.
+How to read this file. The trees below are the **index**: they show which questions were asked, which branches were explored, and which one was taken. The full entries beneath them are the **record**: why each branch was rejected, what was measured, and what each choice costs. A diagram cannot hold rationale, so both exist and the entries remain the normative text.
+
+Append-only. See `AGENTS.md` for format and rules. Do not delete or rewrite past entries — supersede them.
+
+Legend: **green** = accepted · **orange** = open or needs a decision · **red** = considered and rejected · **grey** = evidence · **purple** = superseded.
+
+## Status at a glance
+
+| Entry | ADR | Question | Status |
+|---|---|---|---|
+| D-1 | — | Where do decisions and code knowledge live? | accepted |
+| D-2 | — | Which modules does the project keep? | accepted |
+| D-3 | — | When is the transport gate run? | accepted |
+| D-4 | — | Does v1.0's parallelism survive on QUIC streams? | evidence · superseded by D-6, D-12 |
+| D-5 | — | *(withdrawn — number not reused)* | — |
+| D-6 | ADR-1 | What transport carries the session? | **accepted** — QUIC, control plane |
+| D-7 | ADR-2 | What secures the session? | **accepted** — TLS 1.3, pinned Ed25519 |
+| D-8 | ADR-3 | Second factor for unattended Owned access? | **open — needs maintainer call** |
+| D-9 | ADR-4 | What carries the media plane? | open, constrained by D-14 |
+| D-10 | ADR-5 | How does Android run the core? | proposed — gomobile |
+| D-11 | ADR-6 | Keep consensus/replication? | accepted — dropped |
+| D-12 | ADR-7 | What carries bulk transfer? | superseded by D-14 |
+| D-13 | — | Full stream-count matrix | evidence |
+| D-14 | ADR-7 | What carries bulk transfer? | **accepted** — vendor quic-go + BBR |
+| D-15 | — | How is this file organised? | accepted |
+
+**Open right now:** D-8 (needs a product decision), the BBRv1-vs-v2/v3 sub-decision under D-14, the Linux-only GSO gap (no ADR yet), and D-9.
+
+## Transport — the deep branch
+
+```mermaid
+flowchart TD
+    Q1{"ADR-1<br/>What transport carries v2?"}:::question
+    Q1 --> D6["D-6 · QUIC<br/>session and control plane"]:::accepted
+    Q1 -.rejected.-> R1["TCP everywhere<br/>no connection migration,<br/>no datagrams, N TLS handshakes,<br/>TCP hole punching is harder"]:::rejected
+
+    D6 --> E1["D-4 · D-13 evidence<br/>one QUIC connection flat at 5.5 Mb/s<br/>across 1-8 streams, vs parallel TCP<br/>scaling 3.7 to 27.3 on wan-relay"]:::evidence
+    E1 --> Q2{"ADR-7<br/>What carries bulk transfer?"}:::question
+
+    Q2 -.rejected.-> R2A["a · N QUIC connections<br/>costs the one-connection principle<br/>for files, multiplies path setup<br/>and migration by N"]:::rejected
+    Q2 ==chosen==> D14["D-14 · b · vendor quic-go, add BBR<br/>one-connection principle holds for bulk;<br/>BBR paces to bandwidth and RTprop<br/>instead of treating loss as congestion"]:::accepted
+    Q2 -.rejected.-> R2C["c · parallel-TCP bulk mode<br/>two transports, two NAT stories"]:::rejected
+
+    D14 --> SUB{"BBRv1 or BBRv2/v3?<br/>v1 loss-agnostic, aggressive;<br/>v2/v3 fairer, smaller gain"}:::open
+    D14 --> COST["Standing cost: quic-go vendored,<br/>every upstream security release<br/>must be re-merged"]:::evidence
+    D14 --> GSO["GSO gap — still open<br/>UDP_SEGMENT is Linux-only by construction;<br/>Windows and macOS capped at the degraded row.<br/>BBR changes the congestion window,<br/>not the send path"]:::open
+    R2C -.->|"the only option that<br/>would have avoided this"| GSO
+
+    classDef question fill:#1565c0,color:#fff,stroke:#0d47a1
+    classDef accepted fill:#2e7d32,color:#fff,stroke:#1b5e20
+    classDef rejected fill:#b71c1c,color:#fff,stroke:#7f0000
+    classDef open fill:#ef6c00,color:#fff,stroke:#e65100
+    classDef evidence fill:#455a64,color:#fff,stroke:#263238
+```
+
+## Security and identity
+
+```mermaid
+flowchart TD
+    Q3{"ADR-2<br/>What secures the session?"}:::question
+    Q3 ==chosen==> D7["D-7 · TLS 1.3<br/>self-signed cert keyed by the<br/>Ed25519 device identity,<br/>peer pinned by raw public key,<br/>no CA anywhere"]:::accepted
+    Q3 -.rejected.-> R3A["Noise_IK<br/>quic-go mandates TLS 1.3 as QUIC's<br/>own handshake with no hook to replace it;<br/>would mean a second encryption layer<br/>inside streams, or forking the handshake"]:::rejected
+    Q3 -.rejected.-> R3B["CA-issued certificates<br/>needs an issuing authority,<br/>contradicts PRD R1"]:::rejected
+    Q3 -.rejected.-> R3C["separate TLS keypair<br/>a second key to map and revoke,<br/>for no gain"]:::rejected
+
+    Q4{"ADR-3<br/>Second factor for<br/>unattended Owned access?"}:::question
+    Q4 ==proposed==> D8["D-8 · local unlock to start<br/>an Owned session, configurable,<br/>default on, no re-auth per operation<br/>NEEDS MAINTAINER SIGN-OFF"]:::open
+    Q4 -.rejected.-> R4A["SSH-like, key possession alone<br/>SSH keys carry a passphrase in practice;<br/>adopting the model without the habit<br/>is strictly weaker"]:::rejected
+    Q4 -.rejected.-> R4B["unlock per operation<br/>destroys S3, the away-from-home<br/>session it exists to serve"]:::rejected
+
+    classDef question fill:#1565c0,color:#fff,stroke:#0d47a1
+    classDef accepted fill:#2e7d32,color:#fff,stroke:#1b5e20
+    classDef rejected fill:#b71c1c,color:#fff,stroke:#7f0000
+    classDef open fill:#ef6c00,color:#fff,stroke:#e65100
+```
+
+## Platform and capabilities
+
+```mermaid
+flowchart TD
+    Q5{"ADR-4<br/>What carries the media plane?"}:::question
+    Q5 --> D9["D-9 · open, constrained<br/>D-14 keeps bulk on the one connection,<br/>so mirror datagrams share a congestion<br/>controller with file transfers"]:::open
+    Q5 -.deferred.-> R5A["raw RTP/UDP sidecar<br/>a second NAT and crypto surface;<br/>kept as the fallback, not rejected"]:::rejected
+
+    Q6{"ADR-5<br/>How does Android run the core?"}:::question
+    Q6 ==proposed==> D10["D-10 · gomobile-bound Go core<br/>android/arm64 compiles today;<br/>binding, APK size and battery<br/>still unmeasured, needs an NDK"]:::open
+    Q6 -.rejected.-> R6A["Kotlin reimplementation<br/>doubles the surface of a<br/>security-critical wire protocol<br/>and its audit burden"]:::rejected
+
+    Q7{"ADR-6<br/>Keep consensus and replication?"}:::question
+    Q7 ==chosen==> D11["D-11 · dropped<br/>every capability is a pairwise session;<br/>pairwise needs no agreement protocol"]:::accepted
+    Q7 -.rejected.-> R7A["keep a light replication layer<br/>for hypothetical N-over-2 features<br/>speculative, and never gets removed"]:::rejected
+
+    classDef question fill:#1565c0,color:#fff,stroke:#0d47a1
+    classDef accepted fill:#2e7d32,color:#fff,stroke:#1b5e20
+    classDef rejected fill:#b71c1c,color:#fff,stroke:#7f0000
+    classDef open fill:#ef6c00,color:#fff,stroke:#e65100
+```
+
+## What is still open
+
+```mermaid
+flowchart LR
+    N1["D-8 · local unlock for Owned access"]:::open --> W1["blocks the trust store schema,<br/>which Phase 1 writes early"]:::evidence
+    N2["BBRv1 vs v2/v3 under D-14"]:::open --> W2["blocks starting the quic-go port"]:::evidence
+    N3["GSO gap — no ADR yet"]:::open --> W3["blocks the PRD G1 parity claim<br/>for Windows and macOS bulk"]:::evidence
+    N4["D-9 · media plane"]:::open --> W4["blocks Phase 4 design,<br/>not Phase 1"]:::evidence
+
+    classDef open fill:#ef6c00,color:#fff,stroke:#e65100
+    classDef evidence fill:#455a64,color:#fff,stroke:#263238
+```
+
+---
+
+# Entries
+
+The normative record. Each entry holds the reasoning a diagram cannot.
+
 
 ## D-1: Adopt AGENTS.md + decision log convention
 Date: 2026-07-25
@@ -190,3 +306,11 @@ Consequences:
 - BBRv1 is known to be aggressive toward loss-based flows sharing a bottleneck and can sustain standing queues. On a shared relay, or a home link carrying other traffic, that is a real externality — and it sits uneasily beside v1.0's own noted throughput-versus-fairness trade-off. Worth measuring rather than assuming, particularly since a self-hosted relay may carry several of the user's own transfers at once.
 - Unblocks the `files` capability. Also constrains D-9 (ADR-4): with bulk remaining on the single connection, `mirror` datagrams share one congestion controller with bulk transfers, so the media plane must now be designed under that assumption and the session layer's priority classes carry real weight rather than being a nicety.
 - Follow-up work: port BBR against the `SendAlgorithm` interface in `internal/congestion`, then rerun the `oabench` `wan-relay` profile and compare against D-13. The harness and baseline already exist.
+
+## D-15: Decision log becomes a decision tree; `decisions.md` renamed to `decision-tree.md`
+Date: 2026-07-26
+Status: accepted
+Context: The log had reached thirteen entries with two supersession chains — D-4 into D-6 and D-12, then D-12 into D-14. Read top to bottom it no longer showed what it had actually become: a record of branch points where several options were explored and one was taken. A reader arriving fresh could not see at a glance which questions were still open, or why a rejected option still mattered. D-14's GSO caveat, for instance, only makes sense if you know that option (c) was the one branch that would have avoided it.
+Decision: Rename `docs/decisions.md` to `docs/decision-tree.md` and place Mermaid decision trees at the top as an index, above the unchanged entries. The trees show the questions asked, the branches explored, the branch taken, and what remains open. The entries beneath stay the normative record.
+Alternatives considered: Replace the prose entries with the diagrams alone (rejected — a diagram cannot carry why a branch was rejected, what was measured, or what a choice costs, and that rationale is the entire reason D-1 created the log; the shape of a decision is not the same artefact as its justification). Keep `decisions.md` and add a separate `decision-tree.md` index (rejected — two files drift apart, and an index is only trustworthy sitting beside what it indexes). Keep the flat log and rely on the Status field alone (rejected — supersession chains are exactly what a flat list renders badly, which is the problem being solved).
+Consequences: `AGENTS.md` sections 1 and 3, `docs/functionality.md`, `docs/openair2-hld.md` and `oabench/README.md` updated to the new path. The trees become a maintenance surface — any agent adding an entry must add its node and update the status table in the same commit, because an index that silently disagrees with the entries is worse than no index at all; `AGENTS.md` section 1 now states this. Rendering depends on Mermaid support: GitHub renders it inline, other viewers see the fenced source, which is why the status table above the diagrams is prose rather than an image and remains readable without a renderer.

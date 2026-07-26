@@ -148,7 +148,7 @@ the model applies equally to each.
 
 ## Findings
 
-Full write-up in `docs/decisions.md` **D-4**. Headline, 192 MiB, median of 2,
+Full write-up in `docs/decision-tree.md` **D-4**. Headline, 192 MiB, median of 2,
 1 MiB chunks, single machine.
 
 **Every condition below is emulated** with `tc netem` on an isolated loopback —

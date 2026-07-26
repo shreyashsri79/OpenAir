@@ -133,7 +133,7 @@ Each capability defines its messages in the shared schema (protobuf), its own do
 
 ## 6. Architecture decision records
 
-Written and maintained in `docs/decisions.md` (the repo's decision log, per `AGENTS.md`). Numbered `D-n` there; the ADR label each one answers is in its title.
+Written and maintained in `docs/decision-tree.md` (the repo's decision tree and log, per `AGENTS.md`; Mermaid trees index the entries). Numbered `D-n` there; the ADR label each one answers is in its title.
 
 | ADR | Log entry | Status | Outcome |
 |---|---|---|---|
