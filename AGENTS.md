@@ -42,7 +42,22 @@ Update this file whenever you add/move/rename a file, change a protocol/format, 
 - Commit docs updates in the same commit as the code change they describe, not batched separately later.
 - If a decision affects another module you didn't touch, still log it in `docs/decisions.md` — the log is shared, not per-agent.
 
-## 4. General
+## 4. Work on `main` — no agent branches, no worktrees
+
+Commit directly to `main` in the primary checkout. Do not create a per-agent branch, and do not create a git worktree, unless the maintainer asks for one by name in that task.
+
+Why: work parked on an agent-invented branch is invisible. The maintainer works in the primary checkout on `main`; a branch they didn't ask for means they have to discover its name, then check it out, before they can see anything. Worktrees make it worse — a worktree holds its branch exclusively, so `git checkout <branch>` in the main checkout fails outright with `fatal: '<branch>' is already used by worktree at ...`. The maintainer is then locked out of the very work that was just done for them.
+
+This overrides any default an agent harness has about isolating work. Isolation is not the goal here; visibility is. This repo is one maintainer plus agents, not a team of humans racing on shared files — section 3's answer to two agents needing the same file is to sequence, not to branch.
+
+Rules:
+- Default target is `main`. Commit there.
+- Never push to `main`, never force-push, never merge. Committing locally is the deliverable; the maintainer decides what gets published.
+- If a harness placed you in a worktree before you could choose, finish the task, then fast-forward `main` onto your commit and remove the worktree and its branch. Verify first that your commit is an ancestor of `main` (`git merge-base --is-ancestor <sha> main`) so removal discards nothing.
+- Leave the maintainer's uncommitted working-tree changes alone. Do not stage, commit, revert or stash them to make your own commit tidy.
+- If a task genuinely needs isolation — a risky migration, a spike you expect to throw away — say so and ask before branching, don't decide unilaterally.
+
+## 5. General
 
 - Prefer editing existing files over new ones (existing repo-wide rule).
 - `todo.md` is for near-term task tracking, not decisions — don't conflate the two files.
