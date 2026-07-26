@@ -122,25 +122,45 @@ Loopback rather than a veth pair is a tradeoff: veth is more faithful but moving
 an interface between namespaces needs real root. Shaped loopback still exercises
 the full UDP socket path including `UDP_SEGMENT`, which is what's under test.
 
-| Profile | Rate | RTT | Loss | Represents |
+Every profile is an **emulation** — a rate limit, a fixed delay and a uniform
+random loss rate imposed on loopback. The namespace holds no interface but `lo`
+and has no route off it, so nothing here touches real hardware. Verify with:
+
+```bash
+./netem/lab.sh wifi-5g -- ip -brief link show   # only lo
+./netem/lab.sh wifi-5g -- ip route show         # empty
+```
+
+| Profile | Models this link | Rate | RTT | Loss |
 |---|---|---|---|---|
-| `lan-1g` | 1 Gb/s | 1 ms | 0% | Wired LAN |
-| `wifi-5g` | 200 Mb/s | 6 ms | 0.1% | v1.0's 148 Mb/s test environment |
-| `hotspot` | 600 Mb/s | 4 ms | 0.05% | v1.0's 477 Mb/s direct-hotspot case |
-| `wan-relay` | 100 Mb/s | 80 ms | 0.5% | Relayed path through a VPS |
-| `cgnat-punch` | 50 Mb/s | 120 ms | 1% | Mobile data behind CGNAT |
+| `lan-1g` | Wired gigabit Ethernet between two desktops | 1 Gb/s | 1 ms | 0% |
+| `hotspot` | Phone tethering / device-to-device AP, no infrastructure hop — v1.0's 477 Mb/s case | 600 Mb/s | 4 ms | 0.05% |
+| `wifi-5g` | 5 GHz WiFi through a home access point — v1.0's 148 Mb/s case | 200 Mb/s | 6 ms | 0.1% |
+| `wan-relay` | Cross-network hop via a VPS relay, both peers behind NAT (PRD R7/R8) | 100 Mb/s | 80 ms | 0.5% |
+| `cgnat-punch` | Mobile data behind carrier-grade NAT (PRD K2) | 50 Mb/s | 120 ms | 1% |
+
+**Fidelity limit:** netem is a token bucket plus fixed delay and uniform random
+loss. Real WiFi has contention, rate adaptation and bursty loss; a real relay
+has jitter and competing traffic. Absolute numbers are indicative of the
+modelled link, not predictive of it. The *comparison* holds regardless, because
+both transports run back-to-back under byte-identical conditions — any error in
+the model applies equally to each.
 
 ## Findings
 
 Full write-up in `docs/decisions.md` **D-4**. Headline, 192 MiB, median of 2,
-1 MiB chunks, single machine:
+1 MiB chunks, single machine.
 
-| profile | TCP best | QUIC GSO on | QUIC GSO off |
-|---|---|---|---|
-| lan-1g | 952 | 660 | 446 |
-| hotspot | 568 | 559 | 179 |
-| wifi-5g | 188 | 185 | 93 |
-| wan-relay | **27.4** | **5.5** | 3.3 |
+**Every condition below is emulated** with `tc netem` on an isolated loopback —
+no physical NIC, WiFi radio, hotspot or WAN link was involved. Profile names say
+which real-world link each preset models. Throughput in Mb/s:
+
+| profile | models this link | rate / RTT / loss | TCP best | QUIC GSO on | QUIC GSO off |
+|---|---|---|---|---|---|
+| `lan-1g` | wired gigabit Ethernet | 1 Gb/s / 1 ms / 0% | 952 | 660 | 446 |
+| `hotspot` | phone tethering, device-to-device | 600 Mb/s / 4 ms / 0.05% | 568 | 559 | 179 |
+| `wifi-5g` | 5 GHz WiFi via a home AP | 200 Mb/s / 6 ms / 0.1% | 188 | 185 | 93 |
+| `wan-relay` | VPS relay, both peers behind NAT | 100 Mb/s / 80 ms / 0.5% | **27.4** | **5.5** | 3.3 |
 
 **1. Parallel streams inside one QUIC connection do not replace parallel TCP
 connections.** On the relayed profile, TCP scales 3.75 → 27.4 Mb/s across 1→8

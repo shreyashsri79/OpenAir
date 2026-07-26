@@ -131,13 +131,21 @@ Each capability defines its messages in the shared schema (protobuf), its own do
 - **Observability:** structured logs, per-path metrics (RTT, loss, goodput), qlog on demand; benchmark harness is a first-class tool in `cmd/oabench`.
 - **Testing:** netem-based lab (loss/latency/NAT simulation via network namespaces) so hole punching and migration are CI-testable without real CGNAT.
 
-## 6. Architecture decision records (to write, with current leaning)
-- **ADR-1 Transport = QUIC** (accepted): rationale in research doc; escape hatch = parallel-stream bulk mode if benchmark gate fails off-Linux.
-- **ADR-2 Session crypto:** TLS-1.3-pinned (leaning) vs Noise_IK. Decide before transport code.
-- **ADR-3 Owned-access second factor:** local unlock required? (leaning yes, configurable).
-- **ADR-4 Media plane:** QUIC datagrams (leaning, try first) vs raw RTP/UDP sidecar.
-- **ADR-5 Android core:** gomobile-bound Go core (leaning) vs Kotlin reimplementation of the protocol. gomobile keeps one protocol implementation; cost is binding friction and APK size.
-- **ADR-6 Consensus/replication from the old 2.0 protocol draft (STPB, manifest replication):** explicitly **dropped** for this vision — pairwise sessions need no consensus; revisit only if multi-device coordination features (e.g. one clipboard across N>2 devices with conflict rules) demand it.
+## 6. Architecture decision records
+
+Written and maintained in `docs/decisions.md` (the repo's decision log, per `AGENTS.md`). Numbered `D-n` there; the ADR label each one answers is in its title.
+
+| ADR | Log entry | Status | Outcome |
+|---|---|---|---|
+| ADR-1 Transport | D-6 | accepted | QUIC for session/control. Bulk deliberately excluded — see ADR-7. |
+| ADR-2 Session crypto | D-7 | accepted | TLS 1.3, self-signed certs keyed by the Ed25519 device identity, peer pinned by raw public key. Noise_IK rejected. |
+| ADR-3 Owned second factor | D-8 | proposed | Local unlock to start an Owned session, configurable, default on. Needs maintainer sign-off. |
+| ADR-4 Media plane | D-9 | deferred | Blocked on ADR-7: datagrams share the connection's congestion controller with bulk. |
+| ADR-5 Android core | D-10 | proposed | gomobile-bound Go core. quic-go compiles for android/arm64; binding and APK size unmeasured. |
+| ADR-6 Consensus/replication | D-11 | accepted | Dropped. Pairwise sessions need no agreement protocol. |
+| ADR-7 Bulk transport path | D-12 | proposed | **New** — this section originally had no ADR for it, because the design assumed one connection carries everything. D-4 measured otherwise. BBR-in-quic-go is the deciding experiment. |
+
+Evidence for ADR-1, ADR-5 and ADR-7 comes from the `oabench` transport spike (D-3, D-4). Section 1's principle #1 — one connection per peer — is unchanged for the control plane and pending an explicit exception or reaffirmation for bulk, depending on how ADR-7 resolves.
 
 ## 7. Build order (mirrors PRD phases)
 1. identity + trust store → session over plain LAN QUIC → files + manual clipboard → oabench gate.
