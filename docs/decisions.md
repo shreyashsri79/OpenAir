@@ -31,14 +31,20 @@ Date: 2026-07-25
 Status: proposed
 Context: HLD principle #1 is "one connection per peer" — all capabilities multiplex over a single QUIC connection, which is what makes "works over NAT, always" structural. v1.0's entire performance thesis is the opposite shape: N independent TCP connections, because networks throttle per-flow rather than in aggregate. D-3's harness measured whether that thesis survives being remapped onto N streams inside one QUIC connection.
 
-Measurements (192 MiB, median of 2 runs, chunk 1 MiB, rootless netem lab, single machine). Throughput in Mb/s:
+Measurements: 192 MiB, median of 2 runs, chunk 1 MiB, single machine.
 
-| profile (rate / RTT / loss) | TCP best | QUIC GSO on | QUIC GSO off |
-|---|---|---|---|
-| lan-1g (1 Gb/s / 1 ms / 0%) | 952 | 660 | 446 |
-| hotspot (600 Mb/s / 4 ms / 0.05%) | 568 | 559 | 179 |
-| wifi-5g (200 Mb/s / 6 ms / 0.1%) | 188 | 185 | 93 |
-| wan-relay (100 Mb/s / 80 ms / 0.5%) | 27.4 | 5.5 | 3.3 |
+**All network conditions are emulated**, not measured over real hardware. `netem/lab.sh` applies `tc netem` (rate limit, fixed delay, random loss) to an isolated loopback inside an unprivileged network namespace containing no interface but `lo` and no route off it. No physical NIC, WiFi radio, hotspot or WAN link was involved in any row below. The profile names say which real-world link each preset is *modelling*:
+
+| profile | models this link | rate | RTT | loss | TCP best | QUIC GSO on | QUIC GSO off |
+|---|---|---|---|---|---|---|---|
+| `lan-1g` | wired gigabit Ethernet between two desktops | 1 Gb/s | 1 ms | 0% | 952 | 660 | 446 |
+| `hotspot` | phone tethering / device-to-device AP, no infrastructure hop — v1.0's 477 Mb/s case | 600 Mb/s | 4 ms | 0.05% | 568 | 559 | 179 |
+| `wifi-5g` | 5 GHz WiFi through a home access point — v1.0's 148 Mb/s case | 200 Mb/s | 6 ms | 0.1% | 188 | 185 | 93 |
+| `wan-relay` | cross-network hop via a VPS relay, both peers behind NAT (PRD R7/R8) | 100 Mb/s | 80 ms | 0.5% | 27.4 | 5.5 | 3.3 |
+
+Throughput in Mb/s. A fifth profile, `cgnat-punch` (50 Mb/s / 120 ms / 1%, modelling mobile data behind carrier-grade NAT), is defined in `netem/lab.sh` but was not run for this entry.
+
+Emulation fidelity: netem is a token bucket plus fixed delay and uniform random loss. Real WiFi has contention, rate adaptation and bursty loss; a real relay has jitter and competing traffic. Absolute figures are therefore indicative of the modelled link, not predictive of it. What the emulation does support is the *comparison*: TCP and QUIC ran back-to-back under byte-identical conditions with the same framing and chunk size, so any inaccuracy in the model applies equally to both.
 
 Stream scaling on wan-relay, 1/2/4/8 connections or streams:
 - TCP: 3.75 / 6.97 / 14.6 / 27.4 Mb/s — near-linear, N independent congestion controllers.
@@ -60,12 +66,3 @@ Alternatives considered: Accept degraded relayed throughput (rejected — PRD R8
 
 Consequences: ADR-1 stays accepted for the session/control plane but its bulk-transfer assumption is unproven and must be resolved before the `files` capability is written. HLD principle #1 needs a stated exception for bulk. Two secondary findings recorded: (1) K1 is real — disabling GSO costs 50–70% of QUIC throughput and triples CPU on every profile, so the Windows send path needs a real measurement, though it is no longer the *first* problem; (2) QUIC's 10–20× CPU cost per byte is a live risk for PRD R30 (Android battery, <50 MB RSS desktop daemon) and feeds ADR-5.
 
-Open: all numbers are single-machine. Two-machine runs, and one real Windows run, are still needed to confirm the gigabit and GSO findings — but not to confirm the wan-relay one.
-
-## D-5: Agents commit to `main`; no agent-created branches or worktrees
-Date: 2026-07-26
-Status: accepted
-Context: D-3's spike was delivered on an agent-created branch inside a git worktree, per an agent harness default that isolates work automatically. The result was invisible to the maintainer: the branch name had to be discovered, and because a worktree holds its branch exclusively, checking it out in the primary checkout failed with `fatal: 'worktree-v2-week1-spike' is already used by worktree at ...`. The work had to be fast-forwarded onto `main` and the worktree torn down by hand before it could be read. The isolation defended against a problem this repo does not have — it is one maintainer plus agents, not a team of humans racing on shared files, and section 3 already answers contention by sequencing rather than branching.
-Decision: Agents commit directly to `main` in the primary checkout. No per-agent branches, no worktrees, unless the maintainer asks for one by name in that task. Recorded as `AGENTS.md` section 4, which explicitly overrides harness isolation defaults. Pushing, force-pushing and merging remain off-limits; committing locally is the deliverable.
-Alternatives considered: Keep branches but require the agent to report the branch name (rejected — still leaves the maintainer a checkout step, and the worktree lock makes that step fail); keep worktrees but always fast-forward and clean up at the end (rejected — that is the manual recovery that prompted this, and it fails open: an agent that stops early leaves the branch stranded); branch only for large changes (rejected — no workable size threshold, and the spike that triggered this would have qualified as large).
-Consequences: Agents must leave the maintainer's uncommitted working-tree changes untouched rather than sweeping them into a commit to get a clean tree — staging is now explicit, per-file, never `git add -A`. Concurrent agents sequence on `main` instead of isolating, so section 3's narrow-scope rule carries more weight. An agent that needs genuine isolation must ask first.
