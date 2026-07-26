@@ -140,10 +140,10 @@ Written and maintained in `docs/decisions.md` (the repo's decision log, per `AGE
 | ADR-1 Transport | D-6 | accepted | QUIC for session/control. Bulk deliberately excluded — see ADR-7. |
 | ADR-2 Session crypto | D-7 | accepted | TLS 1.3, self-signed certs keyed by the Ed25519 device identity, peer pinned by raw public key. Noise_IK rejected. |
 | ADR-3 Owned second factor | D-8 | proposed | Local unlock to start an Owned session, configurable, default on. Needs maintainer sign-off. |
-| ADR-4 Media plane | D-9 | deferred | Blocked on ADR-7: datagrams share the connection's congestion controller with bulk. |
+| ADR-4 Media plane | D-9 | unblocked, still open | ADR-7 resolved in favour of one connection, so `mirror` datagrams do share a congestion controller with bulk. Must be designed under that constraint. |
 | ADR-5 Android core | D-10 | proposed | gomobile-bound Go core. quic-go compiles for android/arm64; binding and APK size unmeasured. |
 | ADR-6 Consensus/replication | D-11 | accepted | Dropped. Pairwise sessions need no agreement protocol. |
-| ADR-7 Bulk transport path | D-12 | proposed | **New** — this section originally had no ADR for it, because the design assumed one connection carries everything. D-4 measured otherwise. BBR-in-quic-go is the deciding experiment. |
+| ADR-7 Bulk transport path | D-12 → D-14 | accepted | **New** — this section originally had no ADR for it, because the design assumed one connection carries everything. Resolved: vendor quic-go and add BBR, so principle #1 holds for bulk too. Does not resolve the Linux-only GSO gap. |
 
 Evidence for ADR-1, ADR-5 and ADR-7 comes from the `oabench` transport spike (D-3, D-4). Section 1's principle #1 — one connection per peer — is unchanged for the control plane and pending an explicit exception or reaffirmation for bulk, depending on how ADR-7 resolves.
 
