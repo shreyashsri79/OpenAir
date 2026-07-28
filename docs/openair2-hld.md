@@ -139,7 +139,7 @@ Written and maintained in `docs/decision-tree.md` (the repo's decision tree and 
 |---|---|---|---|
 | ADR-1 Transport | D-6 | accepted | QUIC for session/control. Bulk deliberately excluded — see ADR-7. |
 | ADR-2 Session crypto | D-7 | accepted | TLS 1.3, self-signed certs keyed by the Ed25519 device identity, peer pinned by raw public key. Noise_IK rejected. |
-| ADR-3 Owned second factor | D-8 | proposed | Local unlock to start an Owned session, configurable, default on. Needs maintainer sign-off. |
+| ADR-3 Owned second factor | D-8 → D-18 | accepted | Biometric/passcode to start a session, 6-hour token, opt-in never-expire. Open: sealing the device key in the platform keystore, and Linux's lack of a biometric API. |
 | ADR-4 Media plane | D-9 | unblocked, still open | ADR-7 resolved in favour of one connection, so `mirror` datagrams do share a congestion controller with bulk. Must be designed under that constraint. |
 | ADR-5 Android core | D-10 | proposed | gomobile-bound Go core. quic-go compiles for android/arm64; binding and APK size unmeasured. |
 | ADR-6 Consensus/replication | D-11 | accepted | Dropped. Pairwise sessions need no agreement protocol. |

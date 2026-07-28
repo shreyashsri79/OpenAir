@@ -17,7 +17,7 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-5 | — | *(withdrawn — number not reused)* | — |
 | D-6 | ADR-1 | What transport carries the session? | **accepted** — QUIC, control plane |
 | D-7 | ADR-2 | What secures the session? | **accepted** — TLS 1.3, pinned Ed25519 |
-| D-8 | ADR-3 | Second factor for unattended Owned access? | **open — needs maintainer call** |
+| D-8 | ADR-3 | Second factor for unattended Owned access? | superseded by D-18 |
 | D-9 | ADR-4 | What carries the media plane? | open, constrained by D-14 |
 | D-10 | ADR-5 | How does Android run the core? | proposed — gomobile |
 | D-11 | ADR-6 | Keep consensus/replication? | accepted — dropped |
@@ -27,6 +27,7 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-15 | — | How is this file organised? | accepted |
 | D-16 | ADR-7 sub | BBRv1 or BBRv2/v3? | **accepted** — v1, on availability |
 | D-17 | — | What does sharing a connection cost interactive latency? | evidence — less than separate connections |
+| D-18 | ADR-3 | Second factor for unattended Owned access? | **accepted** — gate + 6h token |
 
 **Open right now:** D-8 (needs a product decision), the Linux-only GSO gap (no ADR yet), and D-9. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
@@ -70,7 +71,9 @@ flowchart TD
     Q3 -.rejected.-> R3C["separate TLS keypair<br/>a second key to map and revoke,<br/>for no gain"]:::rejected
 
     Q4{"ADR-3<br/>Second factor for<br/>unattended Owned access?"}:::question
-    Q4 ==proposed==> D8["D-8 · local unlock to start<br/>an Owned session, configurable,<br/>default on, no re-auth per operation<br/>NEEDS MAINTAINER SIGN-OFF"]:::open
+    Q4 ==chosen==> D18["D-18 · biometric or passcode to start<br/>a session, then a 6-hour token;<br/>manual end or expiry forces re-auth;<br/>opt-in never-expire per device"]:::accepted
+    D18 --> SEAL["Required refinement: seal the D-7 device key<br/>in the platform keystore with user presence,<br/>or the gate is only a flag our own daemon checks"]:::open
+    D18 --> LNX["Linux has no standard biometric API,<br/>so the passcode branch is the guaranteed path —<br/>a credential OpenAir must store and verify itself"]:::open
     Q4 -.rejected.-> R4A["SSH-like, key possession alone<br/>SSH keys carry a passphrase in practice;<br/>adopting the model without the habit<br/>is strictly weaker"]:::rejected
     Q4 -.rejected.-> R4B["unlock per operation<br/>destroys S3, the away-from-home<br/>session it exists to serve"]:::rejected
 
@@ -359,3 +362,35 @@ Findings:
 4. **Datagrams and streams behave alike under load.** 11.85 against 12.17 ms at 4×BDP. Datagrams skip stream flow control but are paced by the same congestion controller, so on this evidence they offer no latency advantage for small messages. That bears on D-9 (ADR-4): the case for a datagram media plane rests on avoiding retransmission of stale video, not on lower latency per message.
 
 Consequences: The Cubic baseline for the BBRv1 comparison is recorded above; when the port lands, rerun `oabench send -probe` on the same profiles and compare against this table rather than against intuition. `BUFFER_BDP` is now the knob for studying bufferbloat deliberately, and the default of 4 should be stated whenever latency figures are quoted. One caveat carried from D-4: this is still a single machine with sender, receiver and netem sharing a core, so absolute latencies include scheduling noise; the comparison between transports under identical conditions is the trustworthy part. HLD's priority classes remain worth building — nothing here measures input contending with bulk *inside* one QUIC connection under stream prioritisation, only that the connection as a whole queues less than four TCP flows do.
+
+## D-18: ADR-3 resolved — biometric/passcode gate with a 6-hour session token
+Date: 2026-07-26
+Status: accepted (supersedes D-8)
+Context: D-8 proposed a local unlock to start an Owned-level session but left the lifetime of that unlock unspecified, which is the parameter that actually determines how long a stolen device stays useful. PRD K10 is the underlying risk: unattended access means possession of a paired device's key is possession of every machine it is paired with.
+Decision: Maintainer-specified flow.
+
+```
+Start session -> biometric/passcode challenge -> success -> grant session token
+   |
+   +-- default: 6-hour timer
+   |      |-- 6 hours elapse ----+
+   |      |-- manual session end +--> invalidate local token -> re-auth required for next access
+   |
+   +-- opt-in "never": active until manual revoke
+```
+
+The challenge gates *starting* a session, not each operation within it, preserving S3 — the away-from-home working session that unattended access exists to serve. Default expiry is six hours; "never" is available but must be opted into per device.
+
+**Required refinement, or the gate is only a policy flag.** As drawn, the token is local state consulted by our own daemon. An attacker who has the machine can bypass a check their own copy of the software performs, because the thing that actually authenticates to peers is the Ed25519 device key from D-7, which sits on disk. To make the gate cryptographically real, the device private key must itself be sealed in the platform keystore with user-presence required — Android Keystore with `setUserAuthenticationRequired`, Windows Hello via CNG, and on Linux the TPM where present. The "session token" is then the unlocked key handle rather than a boolean, and expiry means dropping that handle so the key genuinely cannot be used until the user authenticates again. Without this the design raises the bar against casual theft — a stolen unlocked laptop, someone sitting down at your desk — but not against an attacker who can read the filesystem. Which of those two properties is being claimed must be stated plainly in the threat model PRD R29 requires; they are very different guarantees.
+
+**Platform gap.** Biometrics are not uniformly available. Android has BiometricPrompt and Windows has Hello, both solid. Linux has no standard biometric API — fprintd coverage is patchy and polkit is not a biometric prompt — so the guaranteed path there is the passcode branch of the diagram. That means OpenAir defines and verifies a credential of its own on Linux: a PIN, which must be stored as a KDF hash (argon2id) and never alongside the sealed key, with rate limiting on attempts. That is new attack surface introduced by this decision and it belongs in the threat model rather than being discovered during implementation.
+
+Alternatives considered: Key possession alone, SSH-like (rejected in D-8 and still rejected — SSH keys carry a passphrase plus an agent in practice, and adopting the model without that habit is strictly weaker than the comparison suggests). Unlock per operation (rejected in D-8 — destroys S3). A sliding rather than absolute six-hour window (rejected — a sliding window means an attacker who keeps the session active is never locked out, which inverts the purpose; the timer is absolute from grant).
+
+Consequences and questions this decision creates, to settle before the trust store schema is written:
+- **Token scope.** Per paired peer, or one token covering all Owned devices? Per-peer is the stronger property and the more annoying one. Unspecified above; needs a call.
+- **Behaviour at expiry with work in flight.** A 20 GB transfer at the 5h59m mark should not be destroyed by the timer. Proposed: expiry blocks *new* operations while permitting in-flight ones to finish, since those were authorised when they began. This interacts with PRD R13's resumable transfers and should be explicit.
+- **"Never" must be as deliberate as promotion to Owned.** PRD R3 already makes promotion an explicit act on the target machine; an unlimited token should be equally visible and equally revocable, and ought to appear in the paired-device list rather than hiding in settings.
+- **Auth events belong in the session log.** PRD R4 gives the accessed device a visible indicator and a local log. Unlock, expiry and manual end are exactly the events that log exists to make auditable, and they are initiator-side, so both ends need a record.
+- Trust store record gains the fields this implies: `authPolicy` (timed | never), `tokenGrantedAt`, and whether the device key is keystore-sealed on this platform — the last because it will not be true everywhere at first, and a peer should be able to tell.
+- Adds a `LocalAuth` adapter to the per-platform shells alongside `Clipboard`, `Notifier`, `Capturer` and `Injector`.
