@@ -41,8 +41,9 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-29 | — | Daemon-to-UI IPC? | **accepted** — reuse the session envelope |
 | D-30 | ADR-3 | Is the unlock token per peer or global? | **accepted** — per peer |
 | D-31 | ADR-5 | Does gomobile actually bind quic-go? | **accepted** — yes, 8.4 MB/ABI |
+| D-32 | ADR-8 | When is the Windows work done? | **accepted** — deferred to Phase 2 |
 
-**Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: the Windows baseline (D-22/D-23, runbook in `oabench/winkit/`) and on-device Android throughput and battery. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
 ## Transport — the deep branch
 
@@ -66,6 +67,7 @@ flowchart TD
     D14 --> GSO["Send-path gap · Windows only<br/>UDP_SEGMENT is Linux-only by construction.<br/>Android compiles the linux tag so it is fine;<br/>macOS is best-effort per G1"]:::evidence
     R2C -.->|"the only option that<br/>would have avoided this"| GSO
     GSO ==chosen==> D22["D-22 · ADR-8 · implement USO in the fork<br/>UDP_SEND_MSG_SIZE, sticky socket option<br/>rather than a per-send cmsg. gsoSize already<br/>reaches the platform layer and is discarded"]:::accepted
+    D22 -.deferred by.-> D32["D-32 · Windows work moves to Phase 2<br/>a performance patch, not architecture, so it<br/>does not gate the LLD. Windows cross-compiled<br/>in CI meanwhile so the platform cannot rot"]:::open
     D22 ==extended by==> D23["D-23 · one Windows fast path, both directions<br/>Windows falls back to basicConn: no batching,<br/>and WritePacket panics on gsoSize. USO and URO<br/>share that prerequisite, so they ship together"]:::accepted
 
     classDef question fill:#1565c0,color:#fff,stroke:#0d47a1
@@ -664,3 +666,20 @@ Decision: Accept ADR-5 as decided in D-10 — one Go core, bound with gomobile, 
 Assessment of the cost: roughly 8.4 MB installed per ABI, or about 4.6 MB of download per device once Android App Bundle splits by ABI. That is noticeable but ordinary for this class of tool; Syncthing-Android ships a Go core the same way and is materially larger. The generated API is idiomatic enough for a Compose UI to call directly, with Go errors surfacing as Java exceptions rather than needing a translation layer.
 Alternatives reconsidered in light of the evidence: Kotlin reimplementation (still rejected, and now with less justification than before — the measured cost of the Go path is a few megabytes, against duplicating a security-critical wire protocol and its audit burden). Separate process plus IPC, D-10's stated fallback (not needed; retained only if a future NDK or gomobile regression breaks binding).
 Consequences: On-device throughput and battery are still unmeasured — binding and size are settled, runtime behaviour is not, and PRD K5 asks for a real mid-range device rather than a Pixel. D-4's finding that QUIC costs 10–20x TCP in CPU per byte remains the live risk for PRD R30's battery budget, and it is a runtime question this spike does not answer. `-androidapi 21` must be pinned in the build tooling so the NDK failure does not recur.
+
+## D-32: Windows measurement and ADR-8 implementation deferred to Phase 2
+Date: 2026-07-30
+Status: accepted
+Context: D-22 and D-23 committed the project to a Windows fast path — USO on send, URO on receive — in the vendored quic-go, and required a pre-fix baseline on real hardware before the work began. That baseline needs a Windows machine and a second network host, which are not always to hand. The question is whether it must happen before the LLD.
+Correcting an earlier claim in the process: it was previously argued that both the Windows baseline and the gomobile spike gated the LLD because either could invalidate assumptions baked into it. That holds for gomobile — had binding failed, Android's process model would have changed, which is structural, and D-31 settled it. **It does not hold for Windows.** ADR-8 is a performance patch isolated to the vendored fork. Whether Windows runs at 50% or 95% of TCP changes when the work is scheduled and how it is prioritised; it does not change the architecture, the wire protocol, or the shape of the LLD.
+Decision: Defer the Windows baseline measurement and the ADR-8 implementation to Phase 2. The runbook and cross-compiled binaries remain in `oabench/winkit/` so the measurement can be taken whenever the hardware is free.
+Alternatives considered: Block the LLD on it (rejected per the correction above — it is a scheduling input, not an architectural one). Drop ADR-8 entirely and accept degraded Windows performance (rejected — PRD G1 makes Windows first-class with parity as the bar, so this is a deferral, not a cancellation). Implement USO and URO blind, without a baseline (rejected — D-22 already recorded that without a before-number there is no way to demonstrate the fix achieved anything, only a belief that it should have).
+
+**The real risk of deferring is not throughput — it is that Windows goes unexercised.** Developing entirely on Linux for months is how a project discovers late that its path handling, its service installation, and in this case its **named-pipe IPC** (D-29) were never run on the platform they were designed for. Throughput is a number that can be measured at any time; a codebase that has never been compiled or executed on Windows accumulates breakage that is expensive to unpick all at once.
+
+Mitigation, adopted with this entry: **cross-compile for Windows in CI from the first commit of the v2 tree.** `GOOS=windows go build ./...` costs seconds and catches every compile-level regression — missing build tags, Unix-only syscalls, path assumptions — without needing a Windows machine at all. This does not substitute for running it, but it keeps the platform from silently rotting between now and Phase 2.
+
+Consequences:
+- ADR-8's work moves into Phase 2 alongside the rendezvous, punching and relay work. The vendored fork carries two patches (BBR, D-16) rather than three until then.
+- **The Windows baseline becomes a hard Phase 1 exit blocker rather than a Phase 1 task.** PRD G1's parity bar cannot be claimed for a platform that has never been measured, so Phase 1 cannot be declared complete on Windows until this runs — deferring the work is not deferring the obligation.
+- The two-machine data outstanding since D-4 now comes from the Android runbook instead (`oabench/androidkit/`), since a phone and a desktop are genuinely two machines with two CPUs. That closes the co-location caveat without waiting for a Windows session.

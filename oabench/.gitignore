@@ -6,3 +6,4 @@ netem/results.jsonl
 
 # built binaries
 winkit/*.exe
+androidkit/oabench-android-*
