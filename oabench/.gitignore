@@ -3,3 +3,6 @@
 
 # live matrix output; dated snapshots backing a decision are committed instead
 netem/results.jsonl
+
+# built binaries
+winkit/*.exe

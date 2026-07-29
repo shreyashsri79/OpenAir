@@ -40,8 +40,9 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-28 | — | Protobuf toolchain? | **accepted** — `buf`, codegen committed |
 | D-29 | — | Daemon-to-UI IPC? | **accepted** — reuse the session envelope |
 | D-30 | ADR-3 | Is the unlock token per peer or global? | **accepted** — per peer |
+| D-31 | ADR-5 | Does gomobile actually bind quic-go? | **accepted** — yes, 8.4 MB/ABI |
 
-**Open right now:** D-9 (media plane, Phase 4) and D-10 (gomobile, needs an NDK to measure). Both need spikes rather than decisions. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: the Windows baseline (D-22/D-23, runbook in `oabench/winkit/`) and on-device Android throughput and battery. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
 ## Transport — the deep branch
 
@@ -109,7 +110,7 @@ flowchart TD
     Q5 -.deferred.-> R5A["raw RTP/UDP sidecar<br/>a second NAT and crypto surface;<br/>kept as the fallback, not rejected"]:::rejected
 
     Q6{"ADR-5<br/>How does Android run the core?"}:::question
-    Q6 ==proposed==> D10["D-10 · gomobile-bound Go core<br/>android/arm64 compiles today;<br/>binding, APK size and battery<br/>still unmeasured, needs an NDK"]:::open
+    Q6 ==chosen==> D10["D-31 · gomobile-bound Go core, verified<br/>binds quic-go in 24 s, 8.4 MB per ABI,<br/>clean Java API with Go errors as exceptions.<br/>On-device throughput and battery still open"]:::accepted
     Q6 -.rejected.-> R6A["Kotlin reimplementation<br/>doubles the surface of a<br/>security-critical wire protocol<br/>and its audit burden"]:::rejected
 
     Q7{"ADR-6<br/>Keep consensus and replication?"}:::question
@@ -251,7 +252,7 @@ Consequences: Needs its own spike once D-12 lands, measuring datagram goodput an
 
 ## D-10: ADR-5 — Android core is the gomobile-bound Go core
 Date: 2026-07-26
-Status: proposed
+Status: superseded by D-31 — the decision stands and is now evidenced; gomobile binds quic-go at 8.4 MB per ABI
 Context: HLD ADR-5 weighs a gomobile-bound Go core against reimplementing the protocol in Kotlin. PRD G1 requires Android to be first-class from Phase 1, so this cannot be deferred past Phase 1 planning.
 Evidence from D-3: `CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build` succeeds for quic-go and the whole benchmark module, so the transport is portable to Android as pure Go and the "does it even compile for Android" risk is retired. Not answered, because no Android NDK was available on the development machine: gomobile binding friction, APK size delta, on-device throughput, and battery cost.
 Decision (proposed): gomobile-bound Go core, one protocol implementation shared across all platforms.
@@ -641,3 +642,25 @@ Consequences — consolidated trust store record. Fields have accumulated across
 | `created_at`, `last_seen` | R5 | |
 
 The trust store schema is now fully determined and Phase 1 identity work is unblocked.
+
+## D-31: gomobile binding verified — ADR-5 moves from proposed to accepted
+Date: 2026-07-26
+Status: accepted (supersedes D-10)
+Context: D-10 chose a gomobile-bound Go core over a Kotlin reimplementation, but stayed `proposed` because the deciding evidence was missing: no Android NDK was available, so binding friction, artifact size and build time were unknown. If gomobile could not bind quic-go, Android's Phase 1 scope and the LLD's process model both change.
+Measurement, 2026-07-26. NDK 28.2.13676358 was in fact already installed — an earlier check looked for `ANDROID_NDK_HOME`, which is unset on this machine, and wrongly concluded the toolchain was absent. A package exporting an Ed25519 identity (D-7), a self-signed certificate, and a real `quic.DialAddr` with TLS 1.3 and a pinning callback (D-6) was bound with `gomobile bind`:
+
+| Measure | Result |
+|---|---|
+| Binds at all | **Yes** |
+| Build time, clean, one ABI | 24 s |
+| AAR, `android/arm64` | 4.6 MB |
+| AAR, `arm64` + `armeabi-v7a` | 9.2 MB |
+| `libgojni.so`, uncompressed, per ABI | 8.4 MB |
+| Generated Java API | `deviceID()`, `dial(String, long)`, `selfSignedCertLen()`; Go `error` maps to Java `Exception` |
+
+One friction point worth recording because it costs an afternoon to diagnose: gomobile defaults to Android API 16, which NDK 28 rejects outright (`unsupported API version 16 (not in 21..35)`). `-androidapi 21` or higher is mandatory, and the failure message does not suggest the fix.
+
+Decision: Accept ADR-5 as decided in D-10 — one Go core, bound with gomobile, shared across all platforms.
+Assessment of the cost: roughly 8.4 MB installed per ABI, or about 4.6 MB of download per device once Android App Bundle splits by ABI. That is noticeable but ordinary for this class of tool; Syncthing-Android ships a Go core the same way and is materially larger. The generated API is idiomatic enough for a Compose UI to call directly, with Go errors surfacing as Java exceptions rather than needing a translation layer.
+Alternatives reconsidered in light of the evidence: Kotlin reimplementation (still rejected, and now with less justification than before — the measured cost of the Go path is a few megabytes, against duplicating a security-critical wire protocol and its audit burden). Separate process plus IPC, D-10's stated fallback (not needed; retained only if a future NDK or gomobile regression breaks binding).
+Consequences: On-device throughput and battery are still unmeasured — binding and size are settled, runtime behaviour is not, and PRD K5 asks for a real mid-range device rather than a Pixel. D-4's finding that QUIC costs 10–20x TCP in CPU per byte remains the live risk for PRD R30's battery budget, and it is a runtime question this spike does not answer. `-androidapi 21` must be pinned in the build tooling so the NDK failure does not recur.
