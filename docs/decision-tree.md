@@ -39,8 +39,9 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-27 | — | What does "the fork" mean mechanically? | **accepted** — fork repo + `replace` |
 | D-28 | — | Protobuf toolchain? | **accepted** — `buf`, codegen committed |
 | D-29 | — | Daemon-to-UI IPC? | **accepted** — reuse the session envelope |
+| D-30 | ADR-3 | Is the unlock token per peer or global? | **accepted** — per peer |
 
-**Open right now:** D-9 (media plane, Phase 4), D-10 (gomobile, needs an NDK to measure), and **one question for the maintainer — token scope under D-18: does one unlock authorise Owned access to a single peer or to every paired device?** That is the last item gating the trust store schema. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** D-9 (media plane, Phase 4) and D-10 (gomobile, needs an NDK to measure). Both need spikes rather than decisions. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
 ## Transport — the deep branch
 
@@ -85,6 +86,7 @@ flowchart TD
 
     Q4{"ADR-3<br/>Second factor for<br/>unattended Owned access?"}:::question
     Q4 ==chosen==> D18["D-18 · biometric or passcode to start<br/>a session, then a 6-hour token;<br/>manual end or expiry forces re-auth;<br/>opt-in never-expire per device"]:::accepted
+    D18 --> D30["D-30 · scope is per peer<br/>one prompt per device per 6 hours,<br/>so the prompt can name what it grants"]:::accepted
     D18 ==answered by==> D19["D-19 · key encrypted at rest under K_master<br/>keystore unseal, or Argon2id from a PIN;<br/>both decrypt the Ed25519 key into RAM<br/>for the 6-hour window"]:::accepted
     D19 ==resolved by==> D20["D-20 · two keys per device<br/>identity key always warm, keeps the machine<br/>reachable and runs clipboard and notifications;<br/>privilege key gated, needed only for Owned ops.<br/>D-18's never-expire IS the always-on designation"]:::accepted
     D19 ==resolved by==> D21["D-21 · three protection tiers<br/>1 keystore or TPM · 2 passphrase via Argon2id<br/>3 neither, so Trusted only, no Owned.<br/>Maintainer's Fedora box has TPM 2.0, so tier 1"]:::accepted
@@ -607,3 +609,35 @@ Decision: Local IPC between `openaird` and its tray UI or CLI uses the **same en
 Rationale: one wire format to specify, test and generate goldens for, instead of two. A tray UI issuing a clipboard push sends the identical message the network carries, so there is no translation layer to keep in sync and no second serialisation to reason about in the threat model. Android is unaffected — D-10 puts the core in-process via gomobile, so it has no IPC at all.
 Alternatives considered: gRPC as the HLD specified (rejected — a large dependency and a second codegen path for a local socket with a single trusted client; the streaming and deadline machinery it provides is not needed here). JSON-RPC or HTTP over the socket (rejected — a third serialisation, and it would put a human-readable copy of clipboard and notification content on a socket for no benefit).
 Consequences: Request/response correlation must be implemented, roughly a request-ID map, which gRPC would have supplied — perhaps a hundred lines against a dependency that would otherwise ship in every binary. The socket needs its own access control: it is a local trust boundary, and any process able to open it can drive the daemon, so filesystem permissions and, on Windows, a named-pipe ACL are a security requirement rather than hygiene. HLD section 2 is corrected in the same commit.
+
+## D-30: Owned unlock is scoped per peer — one prompt per device per six hours
+Date: 2026-07-26
+Status: accepted (resolves D-18's open sub-question)
+Context: D-18 established the six-hour token but left its scope undecided: does one unlock authorise Owned access to a single paired device, or to all of them? This was the last item gating the trust store schema.
+Decision: **Per peer.** One unlock authorises Owned operations against one paired device for six hours. Reaching a second device requires its own unlock. Continuity features are unaffected — clipboard and notification mirroring ride the always-warm identity key (D-20), so only browse, mirror, input and unattended pull are gated at all.
+Rationale: the blast-radius argument is real but modest, since an attacker with a live unlocked session mostly reaches the device being actively used. The stronger argument is that scoping makes the prompt informative. "Unlock to access `desktop-home`" states what is being authorised; "Unlock OpenAir" states nothing, and a prompt that names no target trains users to approve reflexively. Friction is small in practice: a session like S3 touches one or two devices.
+Alternatives considered: Global scope (rejected — a single approval granting every machine at once, with a prompt that cannot describe what it grants). Per-operation scope (rejected in D-8 already — destroys the away-from-home session the feature exists for).
+
+**Honest limitation, and a refinement it enables.** As specified in D-19, unlock decrypts the privilege key into RAM for six hours. A key sitting in memory can sign for *any* peer, so per-peer scope is enforced by policy in our own daemon, not by cryptography. It bounds what a well-behaved implementation does and makes the prompt meaningful; it does not stop a daemon compromised mid-session from signing for peers the user never unlocked.
+
+That gap is closable, and this decision makes the fix fit naturally. At unlock, generate an **ephemeral per-peer keypair**, sign its public key with the privilege key to produce a delegation valid six hours *for that peer only*, then immediately re-seal the privilege key. RAM then holds ephemeral keys scoped to specific peers rather than the long-term key. Per-request `AuthProof` signatures (§6) are made by the ephemeral key; the verifier checks the delegation against the pinned privilege public key and the proof against the delegated key — an SSH-certificate shape. Authorising a new peer means another unlock, which is precisely the UX this entry already specifies.
+
+Cost: one additional protocol message carrying the delegation, slightly more verification, and a change to both D-19 and `PROTOCOL.md` §6. **Not adopted here** — it converts per-peer scope from policy into cryptography and is worth doing, but it is a real design change rather than an obvious one, and belongs to the maintainer.
+
+Consequences — consolidated trust store record. Fields have accumulated across five entries; this is the authoritative list, so the LLD does not have to reconstruct it:
+
+| Field | Source | Notes |
+|---|---|---|
+| `device_id` | D-7 | base32(SHA-256(identity pubkey)[0:10]) |
+| `identity_public_key` | D-20 | pinned; terminates TLS, never gated |
+| `privilege_public_key` | D-20 | pinned; verifies Owned `AuthProof` |
+| `display_name` | R5 | renameable |
+| `platform` | — | linux / windows / android / darwin |
+| `level` | R3 | trusted \| owned |
+| `granted_capabilities` | D-25 | persistent grants; revocable from the device list |
+| `auth_policy` | D-18 | timed \| never; "never" also designates always-on (D-20) |
+| `token_granted_at` | D-18, D-30 | **per peer**, per this entry |
+| `protection_tier` | D-21 | 1 keystore/TPM, 2 passphrase, 3 unprotected — tier 3 blocks Owned |
+| `created_at`, `last_seen` | R5 | |
+
+The trust store schema is now fully determined and Phase 1 identity work is unblocked.
