@@ -1,87 +1,86 @@
-# Windows baseline runbook (D-22 / D-23)
+# Windows baseline — single machine (D-22 / D-23 / D-32)
 
-Measures what quic-go actually costs on Windows, where it falls back to
-`basicConn`: no send offload, no batched receive (D-13, D-23). Everything so far
-is inference from code plus a Linux proxy, and D-23 records that those numbers
-are an *optimistic* bound because the Linux runs kept a batched receiver.
+Runs entirely on one Windows machine. No second host, no network emulation, no
+admin rights, no firewall prompts.
 
-This is the **pre-fix baseline**. Without it there is no way to show afterwards
-that the USO/URO work in ADR-8 achieved anything.
+## Exactly what to do
 
-## What you need
+1. Copy these three files to any folder on the Windows machine:
+   - `RUN-ME.bat`
+   - `run-baseline.ps1`
+   - `oabench-amd64.exe` (or `oabench-arm64.exe` on an ARM device — the script
+     picks automatically, so copying both is fine)
 
-- The Linux machine and the Windows laptop on the same network, ideally wired or
-  5 GHz WiFi, with nothing else saturating the link.
-- `oabench.exe` on Windows (build it with `make -C oabench winkit`, or
-  `GOOS=windows GOARCH=amd64 go build -o oabench.exe .`).
-- `oabench` on Linux.
-- The Linux machine's IP: `ip -brief addr | grep -v LOOPBACK`.
+2. **Double-click `RUN-ME.bat`.**
 
-Windows will prompt for firewall access on first run. **Allow it for private
-networks** — QUIC needs inbound UDP, and a silent block looks exactly like
-catastrophic packet loss.
+3. Wait 3–6 minutes. Close heavy applications first; this measurement is
+   CPU-bound by design, so a background build or a browser will skew it.
 
-## Why both directions
+4. When it finishes it prints the results between two markers. Copy everything
+   between `--- copy from here ---` and `--- to here ---` and paste it back.
+   The same text is saved as `results-windows.jsonl` next to the script.
 
-Send and receive are separate gaps in quic-go (D-23), and per the PRD's own
-scenarios the Windows laptop is more often the *receiver* — S2 receives a build
-artifact, S3 pulls files and views a mirror. Measuring only one direction would
-answer the less important half.
+That is all. If Windows SmartScreen objects to the `.exe` because it arrived via
+a browser or email, right-click it → Properties → tick **Unblock**, or run
+`Unblock-File .\oabench-amd64.exe` in PowerShell. If the run reports no results,
+the usual cause is port 9300 already being in use; the script prints the server
+log when that happens.
 
-## Phase A — Windows sends
+## Why loopback, and why that is the right test
 
-On **Linux**:
+The Windows question is **per-packet syscall cost**. quic-go falls back to
+`basicConn` there: no send offload (`UDP_SEND_MSG_SIZE` unused) and no batched
+receive, so it makes one syscall per packet in both directions (D-13, D-23).
 
-```bash
-./oabench serve -transport tcp -addr 0.0.0.0:9100
-```
+On loopback there is no network bottleneck, so throughput is bounded by exactly
+that cost — which makes loopback the *sharpest* instrument for this question
+rather than a compromise. quic-go also paces at a fixed ~1200-byte packet size
+regardless of link MTU, so the QUIC figures compare directly against Linux.
 
-On **Windows**, replacing the IP:
+Everything measured so far has been inference from reading the code, plus a
+Linux proxy (`QUIC_GO_DISABLE_GSO=1`). D-23 records that the proxy is an
+*optimistic* bound, because those Linux runs kept a batched receiver while a
+real Windows machine has neither half. This run replaces inference with a
+number.
 
-```powershell
-.\oabench.exe send -transport tcp -addr 192.168.1.50:9100 `
-  -size 1GiB -streams 1,2,4,8 -runs 3 -label win-sender >> results-windows.jsonl
-```
+## Linux reference, measured 2026-07-30
 
-Stop the Linux server, restart it with `-transport quic`, and repeat the send
-with `-transport quic`. Both transports must run against the same link within a
-few minutes of each other, or you are comparing two different networks.
+Same binary, same loopback, same 512 MiB payload, median of 2 runs, on the
+development machine:
 
-## Phase B — Windows receives
+| config | 1 stream | 4 streams | CPU s/GiB |
+|---|---|---|---|
+| TCP | 14410 Mb/s | 32609 Mb/s | 0.5–0.9 |
+| QUIC, GSO **on** | 2307 Mb/s | 2248 Mb/s | 6.4–6.6 |
+| QUIC, GSO **off** | 692 Mb/s | 688 Mb/s | 26.0–26.7 |
 
-Swap the roles. On **Windows**:
+Disabling GSO costs **3.3× throughput and 4× CPU**. That is the effect ADR-8
+exists to remove.
 
-```powershell
-.\oabench.exe serve -transport tcp -addr 0.0.0.0:9100
-```
+## What the result will mean
 
-On **Linux**:
+Compare your **QUIC** numbers against the GSO-off row. TCP is included for
+context but is not comparable across the two operating systems — loopback MTU
+differs, so TCP uses much larger segments and the figure is inflated on both.
 
-```bash
-./oabench serve -transport tcp   # stop this first if still running
-./oabench send -transport tcp -addr <WINDOWS_IP>:9100 \
-  -size 1GiB -streams 1,2,4,8 -runs 3 -label win-receiver >> results-windows.jsonl
-```
+- **Windows QUIC ≈ 690 Mb/s, ~26 CPU s/GiB** — the Linux proxy was accurate. The
+  send path is the whole story, and D-22's USO work is the fix.
+- **Windows QUIC materially worse** — D-23's prediction is confirmed and
+  quantified: the missing batched receive costs real throughput on top of the
+  missing send offload, making URO as important as USO.
+- **Windows QUIC close to the GSO-on row** — something in the Windows stack is
+  compensating, ADR-8 drops sharply in priority, and the vendored fork carries
+  one patch rather than three.
 
-Repeat for `quic`.
+Record the CPU column either way. If Windows QUIC is CPU-bound rather than
+link-bound, a faster network will not help and the number understates the
+problem.
 
-## Reading the result
+## Later: the two-machine run
 
-The number that matters is **QUIC as a fraction of TCP on the same link**, in
-each direction. PRD G1 makes parity the bar for Windows.
-
-- Above ~85% in both directions: ADR-8 is a lower priority than assumed and the
-  fork carries two patches instead of three.
-- Around 50%, matching the Linux GSO-off proxy: ADR-8 is confirmed and should be
-  scheduled into Phase 1.
-- Worse when Windows receives than when it sends: the receive gap dominates,
-  which D-23 predicts and which would make URO the more urgent half.
-
-Also record `cpu_sec_per_gib`. If Windows QUIC is CPU-bound rather than
-link-bound the throughput figure understates the problem, because a faster link
-will not help.
-
-This run also supplies the **two-machine data** outstanding since D-4, whose
-single-box co-location caveat has qualified every throughput number so far.
-Note the link type and speed alongside the results — without netem there is no
-shaping here, so the physical link is the profile.
+Deferred to Phase 2 by D-32, but still a hard Phase 1 *exit* blocker, since PRD
+G1's parity bar cannot be claimed for a platform never measured on a real link.
+When both machines are free, run `oabench serve` on one and `oabench send` on
+the other, in **both directions** — Windows as sender and as receiver — because
+those are separate gaps (D-23) and the PRD's Windows laptop is more often the
+receiver.
