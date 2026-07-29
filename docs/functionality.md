@@ -22,6 +22,9 @@ Purpose: Desktop GUI (Linux/macOS/Windows) wrapping the Go transfer engine.
 - `internal/sender/sender.go` — send-side logic used by the GUI.
 - `internal/sender/discover.go` — peer discovery for GUI sender (replaces old `discoverAndroid.go`, removed — see decisions log if a rationale entry exists, otherwise log why on next touch).
 
+## docs/PROTOCOL.md — normative wire specification
+Purpose: the versioned wire format, spec-first per HLD principle 4. Covers all four phases: envelope, session establishment, pairing, authorisation and flow control; `files` and `clipboard` (Phase 1); discovery, rendezvous, relay and connection establishment (Phase 2); `remotefs` and `notifications` (Phase 3); `input` and `mirror` (Phase 4). Section 14 (`mirror`) is provisional pending D-9. Where code and this file disagree, the spec is right and the code is a bug. No implementation exists yet.
+
 ## oabench (Go) — v2.0 transport spike
 Purpose: measure whether a single QUIC connection with N streams can match v1.0's N-parallel-TCP engine, and at what CPU cost. Exists to settle PRD risk K1 / ADR-1 **before** the v2 stack is built on QUIC. Own Go module (`github.com/shreyashsri79/openair/oabench`); does not import or affect `openair-gui`.
 - `main.go` — `serve` / `send` subcommands, flag parsing, stream-count sweep, median-of-N.

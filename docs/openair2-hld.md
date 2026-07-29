@@ -126,7 +126,7 @@ Each capability defines its messages in the shared schema (protobuf), its own do
 
 ## 5. Cross-cutting
 
-- **Wire format:** protobuf messages in a length-prefixed envelope `{version, capID, msgType, payload}`. PROTOCOL.md is normative; goldens tested in CI.
+- **Wire format:** protobuf messages in a length-prefixed envelope `{version, capID, msgType, payload}` — 8-byte fixed header, protobuf payload, raw binary for bulk frames. Specified in `docs/PROTOCOL.md`, which is normative and now covers all four phases; goldens tested in CI.
 - **Security:** E2E = TLS 1.3 with pinned self-signed certs (ADR-2 weighs Noise_IK); relay/rendezvous see ciphertext + metadata only; threat model doc covers stolen-device, malicious-relay, malicious-LAN-peer.
 - **Observability:** structured logs, per-path metrics (RTT, loss, goodput), qlog on demand; benchmark harness is a first-class tool in `cmd/oabench`.
 - **Testing:** netem-based lab (loss/latency/NAT simulation via network namespaces) so hole punching and migration are CI-testable without real CGNAT.
