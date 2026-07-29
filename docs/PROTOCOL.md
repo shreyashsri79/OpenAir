@@ -284,6 +284,104 @@ keys. Revocation takes effect mid-session (PRD R5).
 
 ---
 
+### 6.2 Consent at Trusted level
+
+Owned peers act without per-session approval — that is what Owned means. **Trusted
+peers, which is the default at pairing, require consent** (PRD R3), and this is
+the more common path.
+
+```protobuf
+message ConsentRequest {
+  string request_id     = 1;
+  uint32 cap_id         = 2;
+  string operation      = 3;  // human-readable, shown in the prompt verbatim
+  uint32 requested_scope = 4; // 1 = once, 2 = session, 3 = persistent
+}
+
+message ConsentResponse {
+  string request_id = 1;
+  bool   granted    = 2;
+  uint32 scope      = 3;  // MAY be narrower than requested, MUST NOT be wider
+}
+```
+
+The model is hybrid, matching how platform app permissions already behave:
+capabilities granted at pairing or later (§6.4) are persistent and prompt
+nothing; anything ungranted prompts once per session.
+
+- `operation` MUST be shown to the user as written. It is the only thing telling
+  them what they are approving, so implementations MUST NOT substitute a generic
+  string.
+- Granted `scope` MUST NOT exceed `requested_scope`. A peer asking for `once`
+  cannot be handed `persistent`.
+- A denial MUST NOT be re-requested for the same capability within the session.
+  Prompt fatigue is an attack, not an inconvenience.
+- `scope = 3` MUST be recorded in the trust store, so it survives restarts and
+  appears in the paired-device list as something revocable.
+
+### 6.3 Session lifecycle
+
+PRD R4 requires the accessed device to show a visible indicator, keep a local
+session log, and let a local user kill a session instantly.
+
+```protobuf
+message SessionAnnounce {
+  string session_id      = 1;
+  repeated uint32 cap_ids = 2;  // capabilities this session intends to use
+  string purpose         = 3;
+  bool   owned_level     = 4;
+}
+
+message SessionEnd  { string session_id = 1; string reason = 2; }
+message SessionKill { string session_id = 1; }  // accessed device -> initiator
+```
+
+An initiator MUST send `SessionAnnounce` before its first Owned-level operation
+and before any use of `input` or `mirror`. The accessed device MUST display a
+visible indicator for the lifetime of any session naming those capabilities, and
+MUST log announce, end, kill and every authentication event locally — auth events
+originate on the initiator (D-18), so both ends keep a record and neither log is
+sufficient alone.
+
+**`SessionKill` is a courtesy, not the enforcement.** A local user killing a
+session takes effect by the accessed device refusing further operations and
+resetting the relevant streams. The message tells a well-behaved peer why; a
+misbehaving peer cannot ignore its way out, because the enforcement is local.
+
+### 6.4 Granting capabilities
+
+`Revoke` (§6.1) narrows access. Granting widens it, and is what makes the paired
+device list manageable rather than write-once (PRD R5).
+
+```protobuf
+message CapabilityGrant {
+  repeated uint32 cap_ids = 1;
+  uint32 level            = 2;  // 1 = Trusted, 2 = Owned
+}
+```
+
+Sent by the device *granting* access, on its own initiative — never in response
+to a request, so a peer cannot ask to be promoted. Promotion to Owned remains a
+deliberate act on the granting device (PRD R3). Grants take effect immediately.
+
+### 6.5 Expiry and work in flight
+
+When an unlock session expires (D-18), the peer's privilege key becomes
+unavailable and further Owned requests fail with `AUTH_EXPIRED`.
+
+Operations already running are **not** aborted: they were authorised when they
+began, and destroying a 20 GB transfer twelve minutes from completion serves
+nobody. Implementations MUST therefore:
+
+- reject **new** Owned operations at expiry;
+- permit in-flight ones to continue for a **grace of at most one hour**, after
+  which they are aborted regardless. Without the cap, starting a long operation
+  just before expiry would extend access indefinitely, which is precisely what
+  the timer exists to prevent;
+- notify the user **15 minutes before** expiry, so a long transfer can be
+  extended deliberately rather than discovered broken.
+
+
 ## 7. Flow control
 
 ### 7.1 Quiesce
@@ -424,6 +522,32 @@ manifest rather than in the chunk frame so the hot path stays 12 bytes.
 Resume: on reconnect the sender re-offers the same `transfer_id`; the receiver
 returns verified chunk indices in `have_chunks` and the sender skips them
 (PRD R13).
+
+### 8.5 Cancellation and progress
+
+```protobuf
+message TransferCancel {
+  string transfer_id     = 1;
+  string reason          = 2;
+  bool   discard_partial = 3;  // default false — partial data is kept for resume
+}
+
+message TransferProgress {
+  string transfer_id    = 1;
+  uint64 bytes_received = 2;
+  uint64 chunks_verified = 3;
+}
+```
+
+Either side may cancel (PRD R13). The receiver keeps partial data and its
+verified-chunk set unless `discard_partial` is set, because a cancel on a flaky
+link is usually a prelude to retrying, and resume is the feature that makes that
+cheap. Senders SHOULD offer discard explicitly rather than defaulting to it.
+
+`TransferProgress` flows from receiver to sender at roughly 1 Hz. Without it a
+sender cannot display receiver-side progress at all, since bytes written to the
+network are not bytes committed to disk. Speed and ETA are derived by the
+sender; they are deliberately not on the wire, because they are presentation.
 
 ---
 

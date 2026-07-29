@@ -34,8 +34,13 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-22 | ADR-8 | How is the Windows send-path gap closed? | **accepted** — implement USO in the fork |
 | D-23 | ADR-8 | Is the receive side separate work? | **accepted** — no, one Windows fast path |
 | D-24 | — | How are priority classes enforced? | **accepted** — session-layer bulk quiesce |
+| D-25 | — | Consent, session lifecycle, expiry-with-work-in-flight? | **accepted** — hybrid consent, capped grace |
+| D-26 | — | Where does v2 code live? | **accepted** — one root module |
+| D-27 | — | What does "the fork" mean mechanically? | **accepted** — fork repo + `replace` |
+| D-28 | — | Protobuf toolchain? | **accepted** — `buf`, codegen committed |
+| D-29 | — | Daemon-to-UI IPC? | **accepted** — reuse the session envelope |
 
-**Open right now:** D-9 (media plane, does not bite until Phase 4). Every decision blocking Phase 1 is made. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** D-9 (media plane, Phase 4), D-10 (gomobile, needs an NDK to measure), and **one question for the maintainer — token scope under D-18: does one unlock authorise Owned access to a single peer or to every paired device?** That is the last item gating the trust store schema. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
 ## Transport — the deep branch
 
@@ -552,3 +557,53 @@ Consequences:
 - **This changes D-9's lean from A to C.** The strongest remaining argument for datagrams was scheduling: they are packed ahead of stream data. With bulk quiesced there is nothing to be scheduled ahead of, so that argument disappears. Stream-per-frame with `RESET_STREAM` keeps free fragmentation and reassembly, keeps flow control, and avoids the 32-slot datagram send queue whose overflow is a silent discard. D-9 remains open pending its spike, but the spike should now treat C as the favourite rather than A.
 - Two interactions to measure once the BBR port lands. Throttling depresses BBR's delivered-rate estimate, so resuming requires re-probing, and repeated cycles may keep the controller unsettled — a direct interaction between two decisions taken separately. And quiesce is not instantaneous: up to a full congestion window is already in flight, roughly 1 MB on the `wan-relay` profile, so a round-trip-scale latency spike at mirror start should be expected rather than treated as a bug.
 - HLD section 3.4's claim that priority classes are enforced via quic-go stream priorities is factually wrong and is corrected in the same commit as this entry.
+
+## D-25: Authorisation lifecycle — hybrid consent, session announce, capped expiry grace
+Date: 2026-07-26
+Status: accepted
+Context: `PROTOCOL.md` specified Owned-level authorisation thoroughly (§6) and left three things implicit that PRD requirements depend on. Trusted is the *default* level at pairing, so its consent path is the more common one and had no messages at all. PRD R4 requires the accessed device to show an indicator, keep a session log and let a local user kill a session instantly — none of which was signalled. And D-18's six-hour expiry had no defined behaviour for work already running.
+Decision:
+- **Consent is hybrid.** Capabilities granted at pairing or later are persistent and prompt nothing; anything ungranted prompts once per session. PRD R3 permits "per-session or per-capability", and this is both. It matches platform app-permission behaviour, which users already have a model for. Granted scope may narrow what was requested but never widen it, and a denial cannot be re-requested within the session — prompt fatigue is an attack, not an inconvenience.
+- **Sessions are announced.** `SessionAnnounce` precedes the first Owned operation and any use of `input` or `mirror`; `SessionEnd` closes it. Both ends log announce, end, kill and authentication events, because auth events originate on the initiator (D-18) and neither log is sufficient alone.
+- **`SessionKill` is a courtesy message, not the enforcement.** A local user killing a session takes effect by the accessed device refusing further operations and resetting streams. A misbehaving peer cannot ignore its way out, because enforcement is local. Specifying it the other way would have made R4's guarantee depend on the goodwill of the party being revoked.
+- **Expiry does not abort work in flight, but the grace is capped at one hour.** Operations already running were authorised when they began, and destroying a 20 GB transfer near completion serves nobody. Without a cap, starting a long operation just before expiry would extend access indefinitely — exactly what the timer exists to prevent. Users are notified 15 minutes before expiry so a long transfer can be extended deliberately rather than discovered broken.
+Alternatives considered: Per-operation consent (rejected — unusable, and trains users to approve reflexively). Persistent-only consent (rejected — nothing could be tried without first being granted permanently). Hard-kill at expiry (rejected — hostile, and makes long transfers unusable near a boundary the user cannot see). Unbounded grace (rejected — trivially exploitable).
+Consequences: `PROTOCOL.md` §6.2–6.5 and §8.5 specify the messages. Persistent grants are trust-store state and must appear in the paired-device list as revocable. The 15-minute warning needs a UI surface on every platform. The one-hour cap is a policy constant that belongs in configuration, not in the wire format.
+
+## D-26: Repo layout — one root module for v2, `openair-gui` stays separate
+Date: 2026-07-26
+Status: accepted
+Context: The v2 tree does not exist. `oabench` and `openair-gui` are separate modules, and no decision recorded where v2 code should live — which an LLD cannot avoid answering.
+Decision: A single root module `github.com/shreyashsri79/openair`, with `cmd/openaird`, `cmd/openair`, `cmd/oabench` and `internal/{identity,discovery,conn,session,caps,...}`. `openair-gui` remains its own module until v1.0 is retired. `oabench` graduates from its standalone module into `cmd/oabench`.
+Alternatives considered: One module for the whole repository including the GUI (rejected — Fyne pulls GL bindings and a large dependency tree, and the daemon's `go.mod` should not carry them; a headless server install would drag in graphics dependencies for nothing). Multiple modules within v2, splitting core from bindings (rejected — premature. Module boundaries create version-skew and release-ordering work, and at this size buy isolation nobody needs. `gomobile bind` operates on a package, not a module, so D-10 is unaffected). Leave v2 alongside v1 as a third peer module (rejected — that is the shape D-2 already deleted for causing unclear ownership).
+Consequences: `oabench`'s import path changes when it moves; its benchmark results and netem lab are unaffected. v1.0 keeps building and shipping untouched throughout, which was the point of keeping the spike additive. When v1.0 retires, `openair-gui` either folds into the root module or is deleted outright.
+
+## D-27: quic-go is consumed as a fork plus a `replace` directive
+Date: 2026-07-26
+Status: accepted
+Context: Four decisions (D-14, D-16, D-22, D-23) commit the project to a modified quic-go carrying three patches — BBR, Windows USO, Windows URO — without specifying what "the fork" mechanically means.
+Decision: A fork repository, consumed with a `replace` directive and tagged `v0.61.0-openair.N`, rebased onto upstream tags rather than merged.
+
+```
+replace github.com/quic-go/quic-go => github.com/shreyashsri79/quic-go v0.61.0-openair.1
+```
+
+Alternatives considered: Vendor the source in-tree (rejected — every upstream update becomes a manual merge against copied files, and the patch set stops being reviewable as a diff). Git submodule (rejected — extra moving parts, and Go tooling handles `replace` natively). Wait to upstream everything first (rejected — the Windows work is plausibly acceptable upstream but BBR is a larger conversation, and Phase 1 cannot block on someone else's review cycle).
+Consequences: `replace` does not propagate to consumers of a module, which would be disqualifying for a library and is irrelevant for an application — nothing imports OpenAir. Rebasing rather than merging keeps the three patches as distinct, individually upstreamable commits, which matters because D-22 intends to offer the Windows work upstream. Each upstream release requires a rebase, and a fork that stops tracking upstream is a security-relevant dependency going stale (D-16) — this needs a periodic check, not good intentions. This is the same approach apernet/hysteria takes for the same reason.
+
+## D-28: Protobuf toolchain is `buf`, with generated code committed
+Date: 2026-07-26
+Status: accepted
+Context: `PROTOCOL.md` commits to protobuf for structured messages. Nothing said how `.proto` files are compiled, where generated code lives, or whether it is checked in.
+Decision: `buf` for linting, generation and breaking-change detection. Generated Go is committed to the repository.
+Alternatives considered: `protoc` with plugins (rejected — requires every contributor to install a matching toolchain, and provides no breaking-change detection). Generating at build time rather than committing (rejected — a plain `go build` should work on a fresh clone with only the Go toolchain, and committed output makes wire-format changes visible in review, which is exactly where they should be caught).
+Consequences: `buf breaking` runs in CI against the previous release. This is directly load-bearing for PRD R32: the spec's ignore-unknown rules (§3.1) are designed to survive additive change, and `buf` mechanically catches the non-additive kind before it ships. Committed generated code must be regenerated in the same commit as the `.proto` change, and CI must verify the two agree. Golden test vectors for the envelope (HLD §5) live alongside.
+
+## D-29: Daemon-to-UI IPC reuses the session envelope instead of gRPC
+Date: 2026-07-26
+Status: accepted — supersedes the gRPC choice stated in HLD section 2
+Context: HLD section 2 specifies local IPC as "gRPC over unix socket / named pipe". That was written before `PROTOCOL.md` existed. Now that there is an envelope, a protobuf toolchain and a message set, the calculus has changed.
+Decision: Local IPC between `openaird` and its tray UI or CLI uses the **same envelope and the same messages** as the network protocol (§3), over a unix socket or named pipe.
+Rationale: one wire format to specify, test and generate goldens for, instead of two. A tray UI issuing a clipboard push sends the identical message the network carries, so there is no translation layer to keep in sync and no second serialisation to reason about in the threat model. Android is unaffected — D-10 puts the core in-process via gomobile, so it has no IPC at all.
+Alternatives considered: gRPC as the HLD specified (rejected — a large dependency and a second codegen path for a local socket with a single trusted client; the streaming and deadline machinery it provides is not needed here). JSON-RPC or HTTP over the socket (rejected — a third serialisation, and it would put a human-readable copy of clipboard and notification content on a socket for no benefit).
+Consequences: Request/response correlation must be implemented, roughly a request-ID map, which gRPC would have supplied — perhaps a hundred lines against a dependency that would otherwise ship in every binary. The socket needs its own access control: it is a local trust boundary, and any process able to open it can drive the daemon, so filesystem permissions and, on Windows, a named-pipe ACL are a security requirement rather than hygiene. HLD section 2 is corrected in the same commit.

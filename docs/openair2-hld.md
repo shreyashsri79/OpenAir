@@ -50,7 +50,7 @@ Guiding principles:
 └─────────────────────┘          └────────────────────┘   └─────────────┘
 ```
 
-- **openaird**: always-on daemon per device. Desktop: system service + tray UI talking to it over local IPC (gRPC over unix socket / named pipe). Android: the same Go core via gomobile, hosted in a persistent foreground service; Kotlin/Compose UI on top.
+- **openaird**: always-on daemon per device. Desktop: system service + tray UI talking to it over local IPC (the same protocol envelope over a unix socket / named pipe — see D-29; this supersedes an earlier gRPC choice). Android: the same Go core via gomobile, hosted in a persistent foreground service; Kotlin/Compose UI on top.
 - **Rendezvous**: tiny stateless-ish service mapping device pubkey → {current endpoints, relay home, presence}. Self-hostable, one binary.
 - **Relay**: DERP-style ciphertext forwarder listening on TLS/443. Never holds keys, never sees plaintext. Self-hostable.
 - Rendezvous and relay can run in one process for small deployments.
