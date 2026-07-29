@@ -32,8 +32,9 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-20 | ADR-3 | Can a gated key stay reachable unattended? | **accepted** — split identity/privilege keys |
 | D-21 | ADR-3 | What if a device cannot protect its key? | **accepted** — three protection tiers |
 | D-22 | ADR-8 | How is the Windows send-path gap closed? | **accepted** — implement USO in the fork |
+| D-23 | ADR-8 | Is the receive side separate work? | **accepted** — no, one Windows fast path |
 
-**Open right now:** D-9 (media plane, does not bite until Phase 4) and D-22's receive-side follow-up. Every decision blocking Phase 1 is made. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** D-9 (media plane, does not bite until Phase 4). Every decision blocking Phase 1 is made. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
 ## Transport — the deep branch
 
@@ -57,7 +58,7 @@ flowchart TD
     D14 --> GSO["Send-path gap · Windows only<br/>UDP_SEGMENT is Linux-only by construction.<br/>Android compiles the linux tag so it is fine;<br/>macOS is best-effort per G1"]:::evidence
     R2C -.->|"the only option that<br/>would have avoided this"| GSO
     GSO ==chosen==> D22["D-22 · ADR-8 · implement USO in the fork<br/>UDP_SEND_MSG_SIZE, sticky socket option<br/>rather than a per-send cmsg. gsoSize already<br/>reaches the platform layer and is discarded"]:::accepted
-    D22 --> URO["Follow-up: the receive side<br/>Windows URO is unused too, and OpenAir<br/>moves bulk in both directions"]:::open
+    D22 ==extended by==> D23["D-23 · one Windows fast path, both directions<br/>Windows falls back to basicConn: no batching,<br/>and WritePacket panics on gsoSize. USO and URO<br/>share that prerequisite, so they ship together"]:::accepted
 
     classDef question fill:#1565c0,color:#fff,stroke:#0d47a1
     classDef accepted fill:#2e7d32,color:#fff,stroke:#1b5e20
@@ -499,3 +500,27 @@ Consequences:
 - `x/sys/windows` does not define these constants; they will need declaring in the fork.
 - Fold into the same fork as the BBR work from D-16, so there is one patch set against one upstream to re-merge rather than two.
 - If upstream accepts the contribution, the local carrying cost for this piece disappears — a reason to raise a PR early rather than after it has diverged.
+
+## D-23: Windows offload is one piece of work, not USO now and URO later
+Date: 2026-07-26
+Status: accepted (extends D-22's scope; D-22's decision to implement USO is unchanged)
+Context: D-22 recorded the Windows receive side as a follow-up to be tracked separately, on the reasoning that send and receive have independent implementations and independent risk. Inspecting the code rather than assuming shows that reasoning was wrong, and in two ways.
+Findings, verified 2026-07-26 against quic-go v0.61:
+- Windows does not merely lack send offload. It falls back to `basicConn`, the generic path with **no optimisation of any kind**: `ReadPacket` performs a plain `ReadFrom`, one syscall per packet, and `WritePacket` contains `panic("cannot use GSO with a basicConn")`. The batched-receive machinery (`batchConn`, `ReadBatch`) lives in `sys_conn_oob.go`, tagged `darwin || linux || freebsd`.
+- This corrects D-22's framing that "the hook exists; the implementation does not". The `gsoSize` *parameter* does reach the platform layer, but the platform layer on Windows is `basicConn`, which actively rejects it. The work therefore includes introducing a Windows connection type that is not `basicConn` — and that type is the shared prerequisite for both directions.
+Decision: Treat Windows offload as a single piece of work — one Windows fast-path connection implementing both USO on send (`UDP_SEND_MSG_SIZE`) and URO on receive (`UDP_RECV_MAX_COALESCED_SIZE`) — rather than shipping send now and receive later.
+
+Three reasons, in order of weight:
+
+1. **They share their only hard prerequisite.** Both need a Windows connection type replacing `basicConn`. Once that exists, adding the second socket option is incremental rather than a second project. Splitting the work means paying the prerequisite once but carrying two patch sets against an upstream that has to be re-merged on every release.
+2. **On Windows, URO *is* the batching mechanism.** There is no `recvmmsg` equivalent; `WSARecvFrom` returns one datagram at a time. `UDP_RECV_MAX_COALESCED_SIZE` is how a single receive call returns many datagrams. So URO is not an incremental optimisation on top of batched receive the way GRO is on Linux — it is the only way Windows gets more than one packet per syscall, which makes it structurally more important there than its Linux counterpart.
+3. **The PRD's Windows machine is predominantly a receiver.** S2 has the Windows laptop receiving a 2 GB build artifact; S3 has it pulling files from the desktop and viewing a screen mirror. Shipping send offload alone would optimise the direction that persona uses least.
+
+Correction to how D-13's numbers should be read: those runs disabled GSO on both processes, but both were on Linux, and GSO is send-side only — so the receiver retained Linux's batched receive throughout. The measurement was a crippled sender talking to an optimal receiver. Real Windows-to-Windows has an unbatched receiver as well, so **93 Mb/s on `wifi-5g` and 446 on `lan-1g` are optimistic bounds for Windows, not pessimistic ones.** D-4's co-location caveat pushes the other way, which is exactly why the pre-fix baseline on real hardware that D-22 requires cannot be skipped: two errors of unknown size point in opposite directions and only a measurement separates them.
+
+Alternatives considered: Ship USO first and treat URO as a follow-up, per D-22 as written (rejected on the three points above, principally that the prerequisite is shared so the split saves nothing and costs a second re-merge). Implement only URO, on the grounds that the Windows device is mostly a receiver (rejected — bidirectional transfer is a first-class case, and a machine that receives well but sends at half rate is a worse product than one that does neither, because the failure becomes intermittent and direction-dependent rather than consistent). Wait for upstream to build a Windows fast path (rejected for the same reason as in D-22 — no sign of it, and the fork already exists).
+
+Consequences:
+- The scope of the ADR-8 work becomes: one Windows connection type, plus `UDP_SEND_MSG_SIZE`, plus `UDP_RECV_MAX_COALESCED_SIZE`, plus the constants that `x/sys/windows` does not define. Larger than D-22 implied, but a single coherent contribution rather than two partial ones — and correspondingly more attractive to upstream, which is where it should end up.
+- The baseline session on real Windows hardware should measure **both directions**, Windows-as-sender and Windows-as-receiver. `oabench` already supports this by choosing which end runs `serve`; no harness change is needed.
+- Success criterion for ADR-8 is now bidirectional: Windows within reach of the Linux figures on the same profile in both roles, not just as a sender.
