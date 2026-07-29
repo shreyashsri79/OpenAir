@@ -33,6 +33,7 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-21 | ADR-3 | What if a device cannot protect its key? | **accepted** — three protection tiers |
 | D-22 | ADR-8 | How is the Windows send-path gap closed? | **accepted** — implement USO in the fork |
 | D-23 | ADR-8 | Is the receive side separate work? | **accepted** — no, one Windows fast path |
+| D-24 | — | How are priority classes enforced? | **accepted** — session-layer bulk quiesce |
 
 **Open right now:** D-9 (media plane, does not bite until Phase 4). Every decision blocking Phase 1 is made. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
@@ -96,7 +97,8 @@ flowchart TD
 ```mermaid
 flowchart TD
     Q5{"ADR-4<br/>What carries the media plane?"}:::question
-    Q5 --> D9["D-9 · open, constrained<br/>D-14 keeps bulk on the one connection,<br/>so mirror datagrams share a congestion<br/>controller with file transfers"]:::open
+    Q5 --> D9["D-9 · still open, lean now C<br/>D-24 quiesces bulk, which removes the<br/>scheduling argument for datagrams and makes<br/>stream-per-frame with RESET_STREAM favourite"]:::open
+    D9 -.-> D24N["D-24 · quic-go has NO stream priority API.<br/>HLD 3.4's enforcement mechanism does not exist.<br/>Solved above the transport instead of<br/>a third patch to the fork"]:::evidence
     Q5 -.deferred.-> R5A["raw RTP/UDP sidecar<br/>a second NAT and crypto surface;<br/>kept as the fallback, not rejected"]:::rejected
 
     Q6{"ADR-5<br/>How does Android run the core?"}:::question
@@ -234,7 +236,7 @@ Consequences: Requires a local-authentication adapter in the per-platform shells
 
 ## D-9: ADR-4 — Media plane decision deferred until the bulk path is settled
 Date: 2026-07-26
-Status: proposed — open. Was blocked on D-12; D-14 resolved that by keeping bulk on the one connection, so this is now constrained rather than blocked: mirror datagrams share a congestion controller with bulk
+Status: proposed — open, lean moved to option C by D-24. Was blocked on D-12; D-14 resolved that by keeping bulk on the one connection, and D-24 then removed the scheduling argument that favoured datagrams
 Context: HLD ADR-4 leans toward QUIC datagrams for the `mirror` capability, with a Moonlight-style raw RTP-over-UDP sidecar as the fallback if datagrams cannot hold latency. D-3's spike measured streams only; datagrams were not exercised, so no direct evidence exists yet.
 Decision (proposed): Still try datagrams first, but decide this only after D-12, because two findings from D-4 change the inputs. First, QUIC's CPU cost of 15–25 CPU-s/GiB is comfortable at mirror bitrates on a desktop but is an open question on Android at high bitrate, feeding D-10. Second, and more structurally: RFC 9221 datagrams are congestion-controlled by the connection they ride on, so on a single QUIC connection the mirror stream shares one congestion controller with everything else — including bulk file transfer. That is the same single-controller property that sank bulk throughput in D-4. If D-12 moves bulk off this connection, the contention disappears and datagrams look considerably better; if it does not, `mirror` and `files` compete for one congestion window and HLD's priority classes have to carry the entire burden of keeping latency bounded.
 Alternatives considered: Commit to the raw RTP/UDP sidecar now (rejected — it introduces a second NAT-traversal surface and a second crypto surface to audit, which is precisely what one-connection-per-peer exists to avoid; the datagram path has not been shown to fail, only shown to be coupled to an unresolved decision).
@@ -524,3 +526,29 @@ Consequences:
 - The scope of the ADR-8 work becomes: one Windows connection type, plus `UDP_SEND_MSG_SIZE`, plus `UDP_RECV_MAX_COALESCED_SIZE`, plus the constants that `x/sys/windows` does not define. Larger than D-22 implied, but a single coherent contribution rather than two partial ones — and correspondingly more attractive to upstream, which is where it should end up.
 - The baseline session on real Windows hardware should measure **both directions**, Windows-as-sender and Windows-as-receiver. `oabench` already supports this by choosing which end runs `serve`; no harness change is needed.
 - Success criterion for ADR-8 is now bidirectional: Windows within reach of the Linux figures on the same profile in both roles, not just as a sender.
+
+## D-24: Bulk quiesce at the session layer replaces transport-level priority classes
+Date: 2026-07-26
+Status: accepted
+Context: HLD section 3.4 specifies priority classes — `interactive` above `media` above `bulk` — "enforced via quic-go stream priorities + sender-side pacing of bulk writers". Verified 2026-07-26: **quic-go v0.61 exposes no stream prioritisation of any kind.** There is no `SetPriority`, no priority field, nothing exported; the framer round-robins streams. The mechanism the HLD names as the enforcement point does not exist, and building one would be a third patch against the vendored fork alongside BBR (D-16) and Windows offload (D-22, D-23).
+
+Two measurements bound how much of a problem that actually is:
+- D-17 showed small interactive messages already cross a saturated connection at 12.17 ms p50 and 23 ms p99, against a 7 ms idle baseline. Clipboard, notifications and input are small and infrequent, so the `interactive` class does not need prioritisation — it already works unprioritised.
+- `packet_packer.go` packs DATAGRAM frames before stream data unconditionally, so datagrams already receive de-facto priority. That helps only the media plane, and only if the media plane is built on datagrams.
+
+What remains is a single case: sustained high-bitrate media competing with bulk in the same direction.
+
+Decision: The session layer quiesces bulk transfer when a high-bandwidth capability is active — throttled to a floor rather than stopped outright — instead of relying on transport-level priorities. This lives entirely above quic-go, because we control when bulk writers write, so it requires no third patch to a security-critical vendored dependency.
+
+Specifics:
+- **Throttle to a floor, not a hard pause.** S3 is a multi-hour remote working session; stopping bulk entirely would leave a large transfer making no progress for hours. A floor keeps it moving at a cost the mirror will not perceive.
+- QUIC congestion-controls each direction independently, so contention exists only when bulk and media flow the *same* way. A laptop-to-desktop upload does not compete with a desktop-to-laptop mirror at all.
+- When they do contend, the machine that must throttle is the *sender* of the bulk data, which is not necessarily the one initiating the mirror. `PROTOCOL.md` therefore needs a quiesce request carrying a scope and a resume trigger — this is a wire message, not local policy.
+- Arbitration belongs to the session layer, which HLD already puts in charge of flow priority. It simply becomes an application-level scheduler rather than a transport feature.
+
+Alternatives considered: Add a priority scheduler to the vendored fork (rejected — a third patch on a security-critical dependency to solve a problem the application layer can solve directly, and D-17 shows most of the problem does not exist to begin with). Rely on the packer's datagram priority alone (rejected — it covers only the media plane, and it forces the media primitive choice as a side effect rather than on its merits). Leave contention unmanaged (rejected — sustained media against same-direction bulk is precisely the case D-17 does not cover).
+
+Consequences:
+- **This changes D-9's lean from A to C.** The strongest remaining argument for datagrams was scheduling: they are packed ahead of stream data. With bulk quiesced there is nothing to be scheduled ahead of, so that argument disappears. Stream-per-frame with `RESET_STREAM` keeps free fragmentation and reassembly, keeps flow control, and avoids the 32-slot datagram send queue whose overflow is a silent discard. D-9 remains open pending its spike, but the spike should now treat C as the favourite rather than A.
+- Two interactions to measure once the BBR port lands. Throttling depresses BBR's delivered-rate estimate, so resuming requires re-probing, and repeated cycles may keep the controller unsettled — a direct interaction between two decisions taken separately. And quiesce is not instantaneous: up to a full congestion window is already in flight, roughly 1 MB on the `wan-relay` profile, so a round-trip-scale latency spike at mirror start should be expected rather than treated as a bug.
+- HLD section 3.4's claim that priority classes are enforced via quic-go stream priorities is factually wrong and is corrected in the same commit as this entry.

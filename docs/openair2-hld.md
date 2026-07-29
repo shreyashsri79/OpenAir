@@ -84,7 +84,7 @@ Exposes: `Dial(deviceID) → Session`, `OnInbound(func(Session))`, `PathInfo()` 
 ### 3.4 Session layer (`internal/session`)
 - Capability negotiation on connect: both sides exchange `Hello{protoVersion, capabilities[], deviceInfo}`.
 - Stream allocation: control stream (stream 0) + per-operation streams opened by capabilities. Datagram channel shared, with a tiny capability-ID prefix byte for demux.
-- **Priority classes:** `interactive` (input, clipboard) > `media` (mirror datagrams) > `bulk` (file/remotefs streams). Enforced via quic-go stream priorities + sender-side pacing of bulk writers; input additionally rides datagrams so it can never queue behind a stream.
+- **Priority classes:** `interactive` (input, clipboard) > `media` (mirror) > `bulk` (file/remotefs streams). Enforced by **session-layer bulk quiesce**, not by transport priorities — quic-go exposes no stream prioritisation at all (see D-24). Measurement (D-17) shows interactive traffic already crosses a saturated connection acceptably unprioritised, so only sustained media against same-direction bulk needs managing, and it is managed by throttling bulk to a floor.
 - Authorization middleware: every inbound capability request checked against trust level + granted capabilities before reaching the plugin.
 
 ### 3.5 Capability framework (`internal/caps`)
