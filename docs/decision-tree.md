@@ -28,9 +28,11 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-16 | ADR-7 sub | BBRv1 or BBRv2/v3? | **accepted** — v1, on availability |
 | D-17 | — | What does sharing a connection cost interactive latency? | evidence — less than separate connections |
 | D-18 | ADR-3 | Second factor for unattended Owned access? | **accepted** — gate + 6h token |
-| D-19 | ADR-3 | How is the device key protected at rest? | accepted — 2 items still open |
+| D-19 | ADR-3 | How is the device key protected at rest? | accepted — items resolved by D-20, D-21 |
+| D-20 | ADR-3 | Can a gated key stay reachable unattended? | **accepted** — split identity/privilege keys |
+| D-21 | ADR-3 | What if a device cannot protect its key? | **accepted** — three protection tiers |
 
-**Open right now:** the Linux-only GSO gap (no ADR yet), D-9, and D-19's two items — inbound-versus-outbound key gating, and the strength gap between the keystore and PIN branches. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** the Windows-only GSO gap (no ADR yet — Android compiles the Linux `UDP_SEGMENT` path, and macOS is best-effort per G1, so Windows is the only first-class platform affected), and D-9. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
 ## Transport — the deep branch
 
@@ -74,8 +76,8 @@ flowchart TD
     Q4{"ADR-3<br/>Second factor for<br/>unattended Owned access?"}:::question
     Q4 ==chosen==> D18["D-18 · biometric or passcode to start<br/>a session, then a 6-hour token;<br/>manual end or expiry forces re-auth;<br/>opt-in never-expire per device"]:::accepted
     D18 ==answered by==> D19["D-19 · key encrypted at rest under K_master<br/>keystore unseal, or Argon2id from a PIN;<br/>both decrypt the Ed25519 key into RAM<br/>for the 6-hour window"]:::accepted
-    D19 --> IO["OPEN · inbound vs outbound<br/>the same key terminates TLS both ways, so a<br/>sealed responder cannot be reached unattended —<br/>which is what G5 and S3 exist for"]:::open
-    D19 --> LNX["OPEN · the two branches differ in strength<br/>keystore resists offline attack, a PIN does not.<br/>Linux defaults to the PIN branch, so the primary<br/>dev machine has the weakest gate"]:::open
+    D19 ==resolved by==> D20["D-20 · two keys per device<br/>identity key always warm, keeps the machine<br/>reachable and runs clipboard and notifications;<br/>privilege key gated, needed only for Owned ops.<br/>D-18's never-expire IS the always-on designation"]:::accepted
+    D19 ==resolved by==> D21["D-21 · three protection tiers<br/>1 keystore or TPM · 2 passphrase via Argon2id<br/>3 neither, so Trusted only, no Owned.<br/>Maintainer's Fedora box has TPM 2.0, so tier 1"]:::accepted
     Q4 -.rejected.-> R4A["SSH-like, key possession alone<br/>SSH keys carry a passphrase in practice;<br/>adopting the model without the habit<br/>is strictly weaker"]:::rejected
     Q4 -.rejected.-> R4B["unlock per operation<br/>destroys S3, the away-from-home<br/>session it exists to serve"]:::rejected
 
@@ -429,3 +431,49 @@ Implementation requirements this creates:
 - The at-rest format needs specifying in `PROTOCOL.md` alongside the wire format: an AEAD (XChaCha20-Poly1305 or AES-256-GCM), the salt stored beside the ciphertext, and **versioned Argon2id parameters** so cost can be raised later without stranding existing installs.
 - PIN change re-encrypts the key under a newly derived `K_master`. A forgotten PIN is unrecoverable and means re-pairing every device — consistent with D-7's pinning semantics, but it is a user-visible consequence that belongs in the UI, not a surprise.
 - Rate limiting on the PIN path must live wherever the ciphertext does not, or it is trivially skipped by copying the file elsewhere. On-device limiting protects the interactive path only; it does not protect against offline attack, which is item 2 above.
+
+## D-20: Two keys per device — a warm identity key and a gated privilege key; "never" designates always-on
+Date: 2026-07-26
+Status: accepted (resolves D-19 open item 1)
+Context: D-19 left the inbound-versus-outbound question open. One Ed25519 key terminating TLS in both directions cannot both be sealed behind user presence and keep a machine reachable while nobody is there — the two requirements are irreducibly opposed, and PRD G5 and S3 depend on the reachability half.
+Decision: Every device holds two Ed25519 keys.
+- **Identity key** — the one peers pin per D-7. Terminates TLS, always usable, never gated. It keeps the device reachable and authorises the capabilities granted at pairing: clipboard push, notification mirroring, inbound transfer offers. Trusted level.
+- **Privilege key** — encrypted at rest per D-19, unsealed only by D-18's challenge, and live exactly as long as the six-hour token. Required to initiate or authorise Owned-level unattended operations: remote filesystem browse, screen mirror, remote input, unattended pull.
+
+D-18's opt-in "never expire" *is* the always-on designation — one user-visible toggle, not two. A device set to "never" keeps its privilege key unsealed continuously, sealed to boot state in the TPM so it auto-unseals with no human present. A device on the six-hour default re-locks and is simply not remotely controllable while locked, which for a laptop in a bag is the desired behaviour rather than a limitation.
+
+Why this resolves the tension: the identity key never locks, so reachability never depends on anyone being present, and the gate sits on the dangerous capability instead of on the transport that carries everything.
+
+**Consequence worth stating up front, because it nearly went the other way:** the continuity features run on the identity key. Notification mirroring (R21) and clipboard sync (R19) therefore keep working while the privilege key is locked. Had they been gated, a phone left idle for six hours would silently stop mirroring notifications — the gate would have become visible in precisely the place a user would least tolerate it, and the feature would have been blamed rather than the policy.
+
+Android note: Keystore can authorise a key for a bounded period following *device* unlock, so the six-hour window can key off the user unlocking their phone rather than an in-app prompt. Hardware-enforced, and close to free in UX terms.
+
+Alternatives considered: A single key with role-based gating (rejected — role is a property of a session, not a device; a laptop is the initiator when reaching the desktop and the responder when the phone reaches it, so any per-device rule is a convenient fiction). An ephemeral TLS key signed by the long-term key at unlock, SSH-certificate style (rejected — it converts D-7's flat key pinning into a one-level chain, and after six hours the responder's certificate expires and the machine is unreachable again, arriving back at this problem by a longer route).
+
+Consequences:
+- Two keys to generate, store and revoke. Revocation must distinguish "revoke Owned privilege, keep the pairing" — a demotion to Trusted — from a full unpair, which PRD R5 already implies but did not previously have a mechanism for.
+- Pairing exchanges both public keys; the trust store records both.
+- `PROTOCOL.md`: Owned-level capability requests carry a signature from the privilege key, verified by the session layer's authorisation middleware before the request reaches a capability plugin.
+- A stolen device whose identity key is warm can still impersonate the owner at Trusted level — offer files, push clipboard — with consent required on the far end. That blast radius is bounded but real, and belongs in R29's threat model rather than being left implicit.
+- A device with no TPM or keystore cannot safely be designated always-on, since its privilege key would sit unprotected at rest. Handled by D-21.
+
+## D-21: Protection tiers for the privilege key; Owned level requires a protected key
+Date: 2026-07-26
+Status: accepted (resolves D-19 open item 2)
+Context: D-19 left open that its two branches are not of comparable strength. A platform keystore resists offline attack because the hardware enforces attempt limits; a numeric PIN through Argon2id does not, since an attacker holding the ciphertext can grind it offline — roughly days single-threaded for six digits at one second per attempt, and hours parallelised. Per D-18, Linux defaults to the PIN branch, which put the likely primary development machine on the weaker path.
+Decision: Three tiers, in order of preference per device.
+1. **Platform keystore or TPM 2.0** — Android Keystore, Windows Hello via CNG, TPM on Linux. Attempt limits are enforced in hardware, so offline brute force is not available at all.
+2. **Passphrase, not a numeric PIN**, through Argon2id, where no keystore or TPM exists. Four diceware-style words is roughly 51 bits, which at about one second per attempt is computationally out of reach offline. Costs UX every six hours, and applies only to the minority of machines tier 1 does not cover.
+3. **Neither available** — the device may pair and operate at Trusted level, but holds no privilege key. It therefore cannot initiate Owned-level operations and cannot be designated always-on under D-20.
+
+Verified 2026-07-26 on the maintainer's Fedora development machine: TPM 2.0 present (`/dev/tpm0`, `/dev/tpmrm0`, EFI system). The primary Linux machine lands in tier 1, so tier 2 is a fallback for unusual hardware rather than the common Linux case D-18 had assumed.
+
+What makes tier 1 sufficient, and why this matters less than it first appeared: a PIN's offline weakness bites only under the *cold* threat — a stolen powered-off disk, a leaked backup, a home directory synced to cloud storage. Against a live-compromised machine nothing at this layer helps, because an attacker with filesystem access can equally keylog the credential the next time it is typed. Tier 1 closes the cold threat completely; no tier closes the warm one, and pretending otherwise would be the more dangerous error.
+
+Alternatives considered: A numeric PIN with aggressively raised Argon2id parameters as the sole protection (rejected — mitigation rather than a fix; memory-hard parameters tuned to be tolerable on a phone are affordable on a workstation GPU). Accept and document the gap without changing behaviour (rejected — tier 3 is the honest form of that, aligning the capability granted with the protection actually available rather than shipping a weak gate under a strong-sounding name).
+
+Consequences:
+- The tier must be recorded in the trust store *and* visible to peers, so a device deciding whether to grant Owned access can see whether the requesting device actually protects its privilege key. Joins the fields D-18 and D-20 add.
+- The UI must state tier 3 plainly rather than silently degrading; a user who believes they have unattended access and does not is worse off than one who was told.
+- Argon2id parameters are versioned in `PROTOCOL.md` per D-19, so cost can be raised later without stranding existing installs.
+- Linux TPM work is two policies, not one: sealing to PCRs for the always-on case, where the key auto-unseals at boot bound to boot state and no human is present, and sealing with user presence required for the interactive case. D-20 needs both, and they are separate implementations.
