@@ -28,8 +28,9 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-16 | ADR-7 sub | BBRv1 or BBRv2/v3? | **accepted** — v1, on availability |
 | D-17 | — | What does sharing a connection cost interactive latency? | evidence — less than separate connections |
 | D-18 | ADR-3 | Second factor for unattended Owned access? | **accepted** — gate + 6h token |
+| D-19 | ADR-3 | How is the device key protected at rest? | accepted — 2 items still open |
 
-**Open right now:** D-8 (needs a product decision), the Linux-only GSO gap (no ADR yet), and D-9. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** the Linux-only GSO gap (no ADR yet), D-9, and D-19's two items — inbound-versus-outbound key gating, and the strength gap between the keystore and PIN branches. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
 ## Transport — the deep branch
 
@@ -72,8 +73,9 @@ flowchart TD
 
     Q4{"ADR-3<br/>Second factor for<br/>unattended Owned access?"}:::question
     Q4 ==chosen==> D18["D-18 · biometric or passcode to start<br/>a session, then a 6-hour token;<br/>manual end or expiry forces re-auth;<br/>opt-in never-expire per device"]:::accepted
-    D18 --> SEAL["Required refinement: seal the D-7 device key<br/>in the platform keystore with user presence,<br/>or the gate is only a flag our own daemon checks"]:::open
-    D18 --> LNX["Linux has no standard biometric API,<br/>so the passcode branch is the guaranteed path —<br/>a credential OpenAir must store and verify itself"]:::open
+    D18 ==answered by==> D19["D-19 · key encrypted at rest under K_master<br/>keystore unseal, or Argon2id from a PIN;<br/>both decrypt the Ed25519 key into RAM<br/>for the 6-hour window"]:::accepted
+    D19 --> IO["OPEN · inbound vs outbound<br/>the same key terminates TLS both ways, so a<br/>sealed responder cannot be reached unattended —<br/>which is what G5 and S3 exist for"]:::open
+    D19 --> LNX["OPEN · the two branches differ in strength<br/>keystore resists offline attack, a PIN does not.<br/>Linux defaults to the PIN branch, so the primary<br/>dev machine has the weakest gate"]:::open
     Q4 -.rejected.-> R4A["SSH-like, key possession alone<br/>SSH keys carry a passphrase in practice;<br/>adopting the model without the habit<br/>is strictly weaker"]:::rejected
     Q4 -.rejected.-> R4B["unlock per operation<br/>destroys S3, the away-from-home<br/>session it exists to serve"]:::rejected
 
@@ -394,3 +396,36 @@ Consequences and questions this decision creates, to settle before the trust sto
 - **Auth events belong in the session log.** PRD R4 gives the accessed device a visible indicator and a local log. Unlock, expiry and manual end are exactly the events that log exists to make auditable, and they are initiator-side, so both ends need a record.
 - Trust store record gains the fields this implies: `authPolicy` (timed | never), `tokenGrantedAt`, and whether the device key is keystore-sealed on this platform — the last because it will not be true everywhere at first, and a peer should be able to tell.
 - Adds a `LocalAuth` adapter to the per-platform shells alongside `Clipboard`, `Notifier`, `Capturer` and `Injector`.
+
+## D-19: Key-at-rest design for D-18 — keystore or Argon2id, converging on an in-RAM Ed25519 key
+Date: 2026-07-26
+Status: accepted, with two unresolved items called out below
+Context: D-18 recorded the auth gate and 6-hour token, and flagged that as drawn the token was local state our own daemon consults — bypassable by anyone holding the machine, because the D-7 Ed25519 key authenticating to peers sits on disk. This entry records the maintainer's key-management design, which closes that gap.
+Decision:
+
+```
+Request Owned session access
+   |
+   +-- OS biometrics available? --YES--> OS biometric challenge
+   |                                       -> unseal K_master from platform keystore
+   |
+   +---------------------------- NO ----> application PIN / passcode
+                                           -> derive K_master via Argon2id(PIN + salt)
+   |
+   +--> both converge: decrypt the Ed25519 device key into RAM,
+        hold the decrypted state for 6 hours (D-18's token)
+```
+
+The Ed25519 key is stored encrypted at rest under `K_master`. The 6-hour token of D-18 is now concretely the lifetime of the decrypted key in memory, so expiry is a wipe rather than a policy check. Two acquisition paths for `K_master`, one downstream code path.
+
+**Unresolved item 1 — inbound versus outbound. This is load-bearing and the diagram does not yet cover it.** The flow is written from the initiator's side: "request Owned session access". But the same Ed25519 key terminates TLS in *both* directions. If the home desktop's key is sealed and its token has expired, an incoming session from the laptop cannot complete the handshake, and the desktop is unreachable until somebody walks over and authenticates — which is precisely the scenario PRD G5 and S3 exist to eliminate. The gate therefore cannot apply symmetrically. Either the responder keeps its key warm continuously (in which case sealing protects the mobile, stealable device and *not* the always-on desktop, and the threat model must say so), or responders use a separate non-gated key (which weakens the property differently). The asymmetry is defensible — physical access to a running always-on machine is largely game over regardless — but it must be a stated choice, not an accident of which direction the diagram was drawn from.
+
+**Unresolved item 2 — the two branches are not of comparable strength, and Linux is on the weaker one.** The keystore path is not brute-forceable offline: the hardware enforces attempt limits and the secret never leaves it. The Argon2id path is. A 4-to-6 digit PIN carries somewhere around 10^4 to 10^6 of entropy, and an attacker holding the encrypted key file can grind it offline; Argon2id raises the per-attempt cost but does not change the arithmetic, and memory-hard parameters tuned for a phone are affordable on a GPU. Per D-18, Linux has no standard biometric API and therefore defaults to exactly this branch — so the platform likeliest to be the primary development machine, and to hold the most valuable Owned access, has the weakest gate. Options, none free: require a passphrase rather than a numeric PIN where no keystore exists; use the TPM on Linux where present, moving that platform onto the sealed path; or accept the gap explicitly and document it. This needs a decision before implementation.
+
+Refinement worth taking on the keystore path: extracting the key into RAM at all is the weaker of two available designs. Android Keystore and Windows CNG can hold a key and perform signatures *inside* the keystore, so the private key never enters the process. Go's `tls.Certificate.PrivateKey` accepts any `crypto.Signer`, so a keystore-backed signer is compatible with the D-7 TLS design without changing it. Better still, keystore APIs can authorise a key for a bounded period after user authentication, which maps directly onto D-18's six hours and is enforced by hardware rather than by a `time.Timer` in our process that an attacker could patch out. Where this is available it should be preferred, with the decrypt-into-RAM path as the fallback for platforms that lack it.
+
+Implementation requirements this creates:
+- Holding a decrypted private key in Go memory needs deliberate handling: the runtime copies and moves allocations freely, and a key can reach swap or a core dump. Lock the pages (`mlock`/`VirtualLock`), disable core dumps for the daemon, and zero the buffer on expiry, manual end and shutdown. "Hold decrypted state for 6 hours" is the entire security boundary, so this is not a detail.
+- The at-rest format needs specifying in `PROTOCOL.md` alongside the wire format: an AEAD (XChaCha20-Poly1305 or AES-256-GCM), the salt stored beside the ciphertext, and **versioned Argon2id parameters** so cost can be raised later without stranding existing installs.
+- PIN change re-encrypts the key under a newly derived `K_master`. A forgotten PIN is unrecoverable and means re-pairing every device — consistent with D-7's pinning semantics, but it is a user-visible consequence that belongs in the UI, not a surprise.
+- Rate limiting on the PIN path must live wherever the ciphertext does not, or it is trivially skipped by copying the file elsewhere. On-device limiting protects the interactive path only; it does not protect against offline attack, which is item 2 above.
