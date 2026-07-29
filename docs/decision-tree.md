@@ -225,7 +225,7 @@ Consequences: Transport and identity work are unblocked; this was the stated blo
 
 ## D-8: ADR-3 — Owned-level access requires a local unlock to start a session
 Date: 2026-07-26
-Status: proposed — needs maintainer sign-off; no measurement will settle this one
+Status: superseded by D-18 — the gate was accepted with a specified token lifetime, which this entry left open
 Context: PRD K10 and R3. Unattended "Owned" access is the feature that makes S3 (working from a hostel network against a machine nobody is sitting at) possible, and it is also the feature that makes a stolen paired laptop equivalent to owning every other machine. The open question was whether to require a second factor to *use* Owned access or to accept SSH-like semantics where possession of the key is sufficient.
 Decision (proposed): Require a device-local unlock (OS biometric or PIN) to *initiate* an Owned-level session. Configurable per device, default on. Do not require re-authentication per operation within a live session.
 Rationale: the threat being defended against is an unattended or stolen device, which a session-initiation gate covers. Gating each operation instead would defend against nothing extra in that scenario while making the away-from-home working session unusable.
@@ -234,7 +234,7 @@ Consequences: Requires a local-authentication adapter in the per-platform shells
 
 ## D-9: ADR-4 — Media plane decision deferred until the bulk path is settled
 Date: 2026-07-26
-Status: proposed — deferred, blocked on D-12
+Status: proposed — open. Was blocked on D-12; D-14 resolved that by keeping bulk on the one connection, so this is now constrained rather than blocked: mirror datagrams share a congestion controller with bulk
 Context: HLD ADR-4 leans toward QUIC datagrams for the `mirror` capability, with a Moonlight-style raw RTP-over-UDP sidecar as the fallback if datagrams cannot hold latency. D-3's spike measured streams only; datagrams were not exercised, so no direct evidence exists yet.
 Decision (proposed): Still try datagrams first, but decide this only after D-12, because two findings from D-4 change the inputs. First, QUIC's CPU cost of 15–25 CPU-s/GiB is comfortable at mirror bitrates on a desktop but is an open question on Android at high bitrate, feeding D-10. Second, and more structurally: RFC 9221 datagrams are congestion-controlled by the connection they ride on, so on a single QUIC connection the mirror stream shares one congestion controller with everything else — including bulk file transfer. That is the same single-controller property that sank bulk throughput in D-4. If D-12 moves bulk off this connection, the contention disappears and datagrams look considerably better; if it does not, `mirror` and `files` compete for one congestion window and HLD's priority classes have to carry the entire burden of keeping latency bounded.
 Alternatives considered: Commit to the raw RTP/UDP sidecar now (rejected — it introduces a second NAT-traversal surface and a second crypto surface to audit, which is precisely what one-connection-per-peer exists to avoid; the datagram path has not been shown to fail, only shown to be coupled to an unresolved decision).
