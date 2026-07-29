@@ -31,8 +31,9 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-19 | ADR-3 | How is the device key protected at rest? | accepted — items resolved by D-20, D-21 |
 | D-20 | ADR-3 | Can a gated key stay reachable unattended? | **accepted** — split identity/privilege keys |
 | D-21 | ADR-3 | What if a device cannot protect its key? | **accepted** — three protection tiers |
+| D-22 | ADR-8 | How is the Windows send-path gap closed? | **accepted** — implement USO in the fork |
 
-**Open right now:** the Windows-only GSO gap (no ADR yet — Android compiles the Linux `UDP_SEGMENT` path, and macOS is best-effort per G1, so Windows is the only first-class platform affected), and D-9. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** D-9 (media plane, does not bite until Phase 4) and D-22's receive-side follow-up. Every decision blocking Phase 1 is made. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
 ## Transport — the deep branch
 
@@ -53,8 +54,10 @@ flowchart TD
     SUB -.rejected.-> R3V["port BBRv3 from QUICHE<br/>research-grade port, and its ~2% loss<br/>threshold sits above both our profiles<br/>so the goodput gain would be near zero"]:::rejected
     SUB --> QUEUE["D-17 · measured, and it reverses the worry<br/>shared QUIC ping 12.2 ms p50 under load<br/>vs 83.7 ms on a separate TCP connection.<br/>Cubic baseline BBRv1 must beat: 12.2 ms"]:::evidence
     D14 --> COST["Cost, revised by D-16: use apernet/quic-go,<br/>which exports a congestion API, plus<br/>hysteria BBR. Burden becomes tracking<br/>their fork, not carrying a local patch"]:::evidence
-    D14 --> GSO["GSO gap — still open<br/>UDP_SEGMENT is Linux-only by construction;<br/>Windows and macOS capped at the degraded row.<br/>BBR changes the congestion window,<br/>not the send path"]:::open
+    D14 --> GSO["Send-path gap · Windows only<br/>UDP_SEGMENT is Linux-only by construction.<br/>Android compiles the linux tag so it is fine;<br/>macOS is best-effort per G1"]:::evidence
     R2C -.->|"the only option that<br/>would have avoided this"| GSO
+    GSO ==chosen==> D22["D-22 · ADR-8 · implement USO in the fork<br/>UDP_SEND_MSG_SIZE, sticky socket option<br/>rather than a per-send cmsg. gsoSize already<br/>reaches the platform layer and is discarded"]:::accepted
+    D22 --> URO["Follow-up: the receive side<br/>Windows URO is unused too, and OpenAir<br/>moves bulk in both directions"]:::open
 
     classDef question fill:#1565c0,color:#fff,stroke:#0d47a1
     classDef accepted fill:#2e7d32,color:#fff,stroke:#1b5e20
@@ -477,3 +480,22 @@ Consequences:
 - The UI must state tier 3 plainly rather than silently degrading; a user who believes they have unattended access and does not is worse off than one who was told.
 - Argon2id parameters are versioned in `PROTOCOL.md` per D-19, so cost can be raised later without stranding existing installs.
 - Linux TPM work is two policies, not one: sealing to PCRs for the always-on case, where the key auto-unseals at boot bound to boot state and no human is present, and sealing with user presence required for the interactive case. D-20 needs both, and they are separate implementations.
+
+## D-22: ADR-8 — implement Windows UDP Send Offload in the vendored quic-go
+Date: 2026-07-26
+Status: accepted
+Context: D-13 established by code inspection that quic-go's `UDP_SEGMENT` support is Linux-only by construction — `isGSOEnabled` returns a hardcoded `false` on darwin and freebsd, and `appendUDPSegmentSizeMsg` is a no-op stub in `sys_conn_helper_nonlinux.go`. Windows therefore sends one packet per syscall, and measured at roughly half of TCP's throughput on every emulated profile: 93 against 188 Mb/s on `wifi-5g`, 446 against 952 on `lan-1g`. D-14's BBR decision does not touch this, because BBR changes the congestion window and this is a send-path cost. Scope is narrower than earlier entries implied: `GOOS=android` satisfies the `linux` build tag, so Android compiles the GSO path, and macOS is best-effort under PRD G1. Windows is the only first-class platform affected.
+Decision: Implement Windows UDP Send Offload in the quic-go fork D-14 already commits the project to. Windows has USO via the `UDP_SEND_MSG_SIZE` socket option since Windows 10 1709 and Server 2019; quic-go simply does not use it. Offer the work upstream — this is a gap in the library rather than something specific to OpenAir, and carrying it locally forever is worse than trying to hand it back.
+
+Structure verified 2026-07-26, which is what makes this tractable rather than speculative: `gsoSize uint16` is **already threaded through quic-go's platform-agnostic send path**. It appears in the `rawConn.WritePacket` interface in `sys_conn.go`, in `sconn.Write` and `writePacket` in `send_conn.go`, and in `sendQueue.Send`. Windows is excluded from both `sys_conn_oob.go` (tagged `darwin || linux || freebsd`) and `sys_conn_no_oob.go` (which excludes windows explicitly), so it already has its own `sys_conn_windows.go`. The parameter reaches the platform layer and is discarded there. The hook exists; the implementation behind it does not.
+
+One mechanism difference the implementer should expect rather than discover: Linux carries the segment size **per send, as an OOB control message**. Windows `UDP_SEND_MSG_SIZE` is a **sticky socket option** set with `setsockopt`. So this is not a port of the cmsg code but a different mechanism reaching the same effect through an abstraction that already accommodates both. In practice the segment size is stable for the life of a connection, so setting it only when it changes costs nothing measurable.
+
+Alternatives considered: Accept the gap and document it (rejected — PRD G1 makes parity the bar for Windows, and half throughput on bulk transfer is not parity). Use the v1.0 TCP engine for bulk on Windows only (rejected — this is option (c) from D-12, already rejected there for requiring two transports and two NAT stories, and made worse by being platform-conditional). Wait for upstream quic-go to add USO (rejected — no indication it is coming, and the fork already exists for BBR).
+
+Consequences:
+- **Measure before implementing, not as a gate but as a baseline.** The 93-against-188 figures come from a single machine with sender, receiver and netem contending for one core, which penalises the CPU-hungrier transport. `oabench` cross-compiles, so `GOOS=windows go build` and one session on the actual Windows laptop establishes the real pre-fix number. Without it there is no way to demonstrate afterwards that USO worked, only a belief that it should have.
+- **The receive side is separate work.** Linux coalesces receives with `UDP_GRO`; Windows has URO via `UDP_RECV_MAX_COALESCED_SIZE`, which quic-go does not use either. OpenAir moves bulk data in both directions, so a device receiving a large transfer on Windows pays the same per-packet cost this entry fixes for senders. Tracked as follow-up rather than folded in, since the two have independent implementations and independent risk.
+- `x/sys/windows` does not define these constants; they will need declaring in the fork.
+- Fold into the same fork as the BBR work from D-16, so there is one patch set against one upstream to re-merge rather than two.
+- If upstream accepts the contribution, the local carrying cost for this piece disappears — a reason to raise a PR early rather than after it has diverged.

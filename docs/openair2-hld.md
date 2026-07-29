@@ -143,7 +143,8 @@ Written and maintained in `docs/decision-tree.md` (the repo's decision tree and 
 | ADR-4 Media plane | D-9 | unblocked, still open | ADR-7 resolved in favour of one connection, so `mirror` datagrams do share a congestion controller with bulk. Must be designed under that constraint. |
 | ADR-5 Android core | D-10 | proposed | gomobile-bound Go core. quic-go compiles for android/arm64; binding and APK size unmeasured. |
 | ADR-6 Consensus/replication | D-11 | accepted | Dropped. Pairwise sessions need no agreement protocol. |
-| ADR-7 Bulk transport path | D-12 → D-14 | accepted | **New** — this section originally had no ADR for it, because the design assumed one connection carries everything. Resolved: vendor quic-go and add BBR, so principle #1 holds for bulk too. Does not resolve the Linux-only GSO gap. |
+| ADR-8 Windows send offload | D-22 | accepted | **New** — implement USO (`UDP_SEND_MSG_SIZE`) in the vendored quic-go and offer it upstream. Windows is the only first-class platform without a segmentation-offload path. |
+| ADR-7 Bulk transport path | D-12 → D-14 | accepted | **New** — this section originally had no ADR for it, because the design assumed one connection carries everything. Resolved: vendor quic-go and add BBR, so principle #1 holds for bulk too. The send-path gap it leaves is ADR-8. |
 
 Evidence for ADR-1, ADR-5 and ADR-7 comes from the `oabench` transport spike (D-3, D-4). Section 1's principle #1 — one connection per peer — is unchanged for the control plane and pending an explicit exception or reaffirmation for bulk, depending on how ADR-7 resolves.
 
