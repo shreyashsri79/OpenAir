@@ -22,6 +22,17 @@ Purpose: Desktop GUI (Linux/macOS/Windows) wrapping the Go transfer engine.
 - `internal/sender/sender.go` — send-side logic used by the GUI.
 - `internal/sender/discover.go` — peer discovery for GUI sender (replaces old `discoverAndroid.go`, removed — see decisions log if a rationale entry exists, otherwise log why on next touch).
 
+## v2 tree (Go, root module `github.com/shreyashsri79/openair`)
+Purpose: OpenAir 2.0. Per D-26 this is one module; `openair-gui` and `oabench` stay separate until v1.0 retires. Currently a skeleton — every package has a `doc.go` stating its responsibility and the decisions governing it, and nothing else. No behaviour yet.
+- `cmd/openaird` — the always-on daemon.
+- `cmd/openair` — CLI client over local IPC (D-29: the session envelope, not gRPC).
+- `internal/identity` — two keypairs (D-20), at-rest sealing (D-19), unlock sessions (D-18, D-30), protection tiers (D-21), trust store.
+- `internal/discovery` — mDNS `_openair._udp` plus unicast fallback. Emits candidates, never dials.
+- `internal/conn` — one QUIC connection per peer (D-6); Phase 2 adds path racing and migration.
+- `internal/session` — envelope framing, capability negotiation, authorisation middleware, quiesce arbitration (D-24).
+- `internal/caps/{files,clipboard}` — Phase 1 capabilities.
+- `internal/wire` — generated protobuf, committed (D-28).
+
 ## proto/ and internal/wire/ — executable wire schemas
 Purpose: `docs/PROTOCOL.md` in compilable form. `proto/openair/v1/` holds one file per capability plus `common.proto` for shared enums; `internal/wire/` holds committed generated Go (D-28). Root `buf.yaml` defines the workspace, `buf.gen.yaml` the codegen. `buf lint` uses STANDARD; `buf breaking` guards PRD R32's mixed-version compatibility mechanically.
 - `input` (capID 5) has no schema by design — raw datagram encoding, PROTOCOL.md section 13.
