@@ -42,6 +42,7 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-30 | ADR-3 | Is the unlock token per peer or global? | **accepted** — per peer |
 | D-31 | ADR-5 | Does gomobile actually bind quic-go? | **accepted** — yes, 8.4 MB/ABI |
 | D-32 | ADR-8 | When is the Windows work done? | **accepted** — deferred to Phase 2 |
+| D-33 | ADR-8 | What does Windows actually cost? | evidence — 1450 Mb/s at 1 stream, 647 at 4 |
 
 **Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
@@ -68,6 +69,7 @@ flowchart TD
     R2C -.->|"the only option that<br/>would have avoided this"| GSO
     GSO ==chosen==> D22["D-22 · ADR-8 · implement USO in the fork<br/>UDP_SEND_MSG_SIZE, sticky socket option<br/>rather than a per-send cmsg. gsoSize already<br/>reaches the platform layer and is discarded"]:::accepted
     D22 -.deferred by.-> D32["D-32 · Windows work moves to Phase 2<br/>a performance patch, not architecture, so it<br/>does not gate the LLD. Windows cross-compiled<br/>in CI meanwhile so the platform cannot rot"]:::open
+    D32 --> D33["D-33 · measured: 1450 Mb/s at 1 stream,<br/>2.1x better than the GSO-off proxy predicted,<br/>but 647 at 4 streams. Use 1-2 streams for bulk;<br/>ADR-8 is not urgent for throughput"]:::evidence
     D22 ==extended by==> D23["D-23 · one Windows fast path, both directions<br/>Windows falls back to basicConn: no batching,<br/>and WritePacket panics on gsoSize. USO and URO<br/>share that prerequisite, so they ship together"]:::accepted
 
     classDef question fill:#1565c0,color:#fff,stroke:#0d47a1
@@ -683,3 +685,34 @@ Consequences:
 - ADR-8's work moves into Phase 2 alongside the rendezvous, punching and relay work. The vendored fork carries two patches (BBR, D-16) rather than three until then.
 - **The Windows baseline becomes a hard Phase 1 exit blocker rather than a Phase 1 task.** PRD G1's parity bar cannot be claimed for a platform that has never been measured, so Phase 1 cannot be declared complete on Windows until this runs — deferring the work is not deferring the obligation.
 - The two-machine data outstanding since D-4 now comes from the Android runbook instead (`oabench/androidkit/`), since a phone and a desktop are genuinely two machines with two CPUs. That closes the co-location caveat without waiting for a Windows session.
+
+## D-33: Windows baseline measured — the Linux GSO-off proxy was wrong in both directions
+Date: 2026-07-30
+Status: accepted (evidence entry; revises D-23's reading, changes no decision)
+Context: D-13 established by code inspection that quic-go has no send offload and no batched receive on Windows. D-23 predicted the Linux `QUIC_GO_DISABLE_GSO=1` runs were an *optimistic* bound for Windows, since those Linux processes retained a batched receiver while a real Windows machine has neither half. D-22 required a real measurement before implementing ADR-8. Taken 2026-07-30 on the maintainer's Windows laptop, single machine, loopback, 512 MiB, median of 2 runs.
+
+| config | 1 stream | 4 streams |
+|---|---|---|
+| **Windows** TCP | 20616 Mb/s | 27753 Mb/s |
+| **Windows** QUIC | **1450 Mb/s** | **647 Mb/s** |
+| Linux TCP | 14410 Mb/s | 32609 Mb/s |
+| Linux QUIC, GSO on | 2307 Mb/s | 2248 Mb/s |
+| Linux QUIC, GSO off | 692 Mb/s | 688 Mb/s |
+
+Findings:
+
+1. **At one stream, Windows beats the GSO-off proxy by 2.1x — so D-23's "optimistic bound" reading was wrong.** Windows QUIC reaches 1450 Mb/s against the proxy's 692, and sits much closer to Linux with GSO enabled. Even normalising for hardware — Windows TCP single-stream is 1.43x faster than Linux on the same test, so the laptop is the quicker machine on that path — Windows lands near 1010 Linux-equivalent Mb/s, still comfortably above the proxy. The likely reason is that the two paths are not the same code: Linux with GSO disabled still traverses the OOB control-message machinery in `sys_conn_oob.go`, whereas Windows uses the leaner `basicConn` plain `WriteTo`. "Linux minus GSO" was never Windows, and it misestimates in both directions.
+
+2. **Windows QUIC collapses as stream count rises: 1450 down to 647, a 2.2x fall.** Linux is flat in both configurations (2307 to 2248 with GSO, 692 to 688 without). D-13 found mild degradation past two streams on Linux; on Windows it is severe and it is the dominant effect in this data. At four streams Windows lands at 647, essentially the GSO-off proxy figure — which is why a four-stream-only measurement would have appeared to confirm D-23 while concealing the single-stream result entirely.
+
+3. **Practical consequence: ADR-8 is not urgent for throughput.** 1450 Mb/s of loopback headroom at one stream exceeds any link this product realistically runs on — 5 GHz WiFi, gigabit Ethernet, a relayed WAN path. Windows QUIC will saturate all of them. ADR-8 matters for 2.5G+ links and for CPU efficiency, not for ordinary transfers. This supports D-32's deferral to Phase 2 with evidence rather than convenience.
+
+4. **Design constraint, and the more valuable result: use one or two streams for bulk, never four or more.** D-13 already showed extra streams do not help QUIC; this shows that on Windows they cost 2.2x. Combined with D-14 keeping bulk on one connection and D-24 quiescing it under media load, the `files` capability should default to a low stream count and treat higher values as a tuning escape hatch rather than the norm. v1.0's eight workers are actively harmful here.
+
+Caveats, stated because they bound what this supports: the two machines differ, and TCP loopback is an imperfect hardware normaliser because it is MTU-sensitive. Loopback measures per-packet CPU cost rather than link behaviour, which is what makes it the right instrument for this question and the wrong one for predicting a real network. **CPU per byte is missing entirely** — see below.
+
+Two harness defects this run exposed, both fixed in the same commit:
+- `cpu_sec_per_gib` reported zero on every row. The non-Linux implementation was a stub, while the runbook told the operator the CPU column was the important one. Now implemented with `GetProcessTimes`.
+- Results were labelled `gso: "on"` on Windows. The field read the `QUIC_GO_DISABLE_GSO` environment variable on every platform rather than the platform's actual capability, and Windows has no offload to enable. Now reports `"none"` off Linux.
+
+Consequences: ADR-8 keeps its Phase 2 slot (D-32) with the throughput justification weakened and the CPU justification unmeasured. The stream-count finding feeds directly into the `files` capability's defaults. A re-run with the fixed binary would settle whether Windows QUIC is CPU-bound or link-bound at these rates, which is the remaining input to ADR-8's cost/benefit and to PRD R30.

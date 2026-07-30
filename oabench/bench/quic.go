@@ -6,22 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go"
 )
-
-// GSOState reports whether quic-go's generic segmentation offload is active.
-// Disabling it via QUIC_GO_DISABLE_GSO is how a Linux box approximates the
-// Windows send path, which has no equivalent batching -- see README.
-func GSOState() string {
-	if os.Getenv("QUIC_GO_DISABLE_GSO") != "" {
-		return "off"
-	}
-	return "on"
-}
 
 func quicConfig(cfg Config) *quic.Config {
 	streamWnd := cfg.StreamWindow
@@ -104,7 +93,7 @@ func ServeQUIC(addr, sinkPath string) error {
 		return err
 	}
 	defer ln.Close()
-	log.Printf("quic receiver listening on %s (device %s, gso=%s)", ln.Addr(), DeviceID(pub), GSOState())
+	log.Printf("quic receiver listening on %s (device %s, gso=%s)", ln.Addr(), DeviceID(pub), gsoState())
 
 	for {
 		conn, err := ln.Accept(context.Background())
@@ -207,7 +196,7 @@ func serveQUICSession(conn *quic.Conn, sinkPath string) error {
 func RunQUIC(cfg Config) *Result {
 	res := &Result{
 		Transport: "quic", Streams: cfg.Streams, ChunkBytes: cfg.ChunkBytes,
-		TotalBytes: cfg.TotalBytes, GSO: GSOState(),
+		TotalBytes: cfg.TotalBytes, GSO: gsoState(),
 		Profile: cfg.Profile, Label: cfg.Label,
 	}
 	ctx := context.Background()

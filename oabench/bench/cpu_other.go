@@ -1,8 +1,7 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package bench
 
-// cpuSeconds is a no-op off Linux. The spike targets Linux; when this harness
-// is eventually run on Windows to answer K1 for real, implement this with
-// GetProcessTimes.
+// cpuSeconds is unimplemented on this platform. Results will report zero CPU,
+// which is visibly wrong rather than plausibly wrong.
 func cpuSeconds() float64 { return 0 }
