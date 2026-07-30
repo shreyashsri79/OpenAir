@@ -58,7 +58,13 @@ Rules:
 - Leave the maintainer's uncommitted working-tree changes alone. Do not stage, commit, revert or stash them to make your own commit tidy.
 - If a task genuinely needs isolation — a risky migration, a spike you expect to throw away — say so and ask before branching, don't decide unilaterally.
 
-## 5. General
+## 5. Picking up work
+
+`docs/BUILD-PLAN.md` is the execution plan: milestones, what each one must deliver to count as done, which can run in parallel, and — per task — the exact document sections to read. Start there rather than reading the reference docs end to end.
+
+`docs/decision-tree.md` and `docs/PROTOCOL.md` are reference works, not reading material. The decision tree's status table is its index; the build plan names the specific entries and protocol sections each task needs. Loading either in full is how a context window is spent before any code is written.
+
+## 6. General
 
 - Prefer editing existing files over new ones (existing repo-wide rule).
 - `todo.md` is for near-term task tracking, not decisions — don't conflate the two files.

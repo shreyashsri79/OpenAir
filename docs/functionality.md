@@ -22,6 +22,9 @@ Purpose: Desktop GUI (Linux/macOS/Windows) wrapping the Go transfer engine.
 - `internal/sender/sender.go` — send-side logic used by the GUI.
 - `internal/sender/discover.go` — peer discovery for GUI sender (replaces old `discoverAndroid.go`, removed — see decisions log if a rationale entry exists, otherwise log why on next touch).
 
+## docs/BUILD-PLAN.md — execution plan
+Purpose: the whole project split into 15 milestones plus 6 cross-cutting tracks, each independently runnable so no milestone waits on a later one to be useful. Carries a complexity tier per task (T1 mechanical / T2 standard / T3 deep) for model assignment, an 8-wave parallelisation map, and — per task — the exact document sections an agent should read and the ones it should not. Start here when picking up work.
+
 ## v2 tree (Go, root module `github.com/shreyashsri79/openair`)
 Purpose: OpenAir 2.0. Per D-26 this is one module; `openair-gui` and `oabench` stay separate until v1.0 retires. Currently a skeleton — every package has a `doc.go` stating its responsibility and the decisions governing it, and nothing else. No behaviour yet.
 - `cmd/openaird` — the always-on daemon.
