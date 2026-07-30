@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package openair.v1;
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+// CapabilityId enumerates the capabilities carried in the envelope's capID
+// byte. See PROTOCOL.md Appendix B.
+//
+// Note the offset from the wire values: proto3 reserves 0 for UNSPECIFIED, so
+// these constants are NOT the on-wire capID. The wire value is the enum value
+// minus one. Encoders must convert.
+enum CapabilityId {
+  CAPABILITY_ID_UNSPECIFIED = 0;
+  CAPABILITY_ID_CONTROL = 1;        // wire 0
+  CAPABILITY_ID_FILES = 2;          // wire 1
+  CAPABILITY_ID_CLIPBOARD = 3;      // wire 2
+  CAPABILITY_ID_REMOTEFS = 4;       // wire 3
+  CAPABILITY_ID_NOTIFICATIONS = 5;  // wire 4
+  CAPABILITY_ID_INPUT = 6;          // wire 5
+  CAPABILITY_ID_MIRROR = 7;         // wire 6
+}
+
+// TrustLevel is the access level granted to a paired peer (PRD R3, D-20).
+enum TrustLevel {
+  TRUST_LEVEL_UNSPECIFIED = 0;
+  TRUST_LEVEL_UNPAIRED = 1;  // revocation target: discard both pinned keys
+  TRUST_LEVEL_TRUSTED = 2;   // default at pairing; consent required
+  TRUST_LEVEL_OWNED = 3;     // unattended access, gated by the privilege key
+}
+
+// ProtectionTier reports how a device protects its privilege key (D-21).
+// A peer at TIER_NONE must not be granted TRUST_LEVEL_OWNED.
+enum ProtectionTier {
+  PROTECTION_TIER_UNSPECIFIED = 0;
+  PROTECTION_TIER_KEYSTORE = 1;    // platform keystore or TPM 2.0
+  PROTECTION_TIER_PASSPHRASE = 2;  // Argon2id over a passphrase
+  PROTECTION_TIER_NONE = 3;        // unprotected; Trusted only
+}
+
+// ConsentScope is how long a Trusted-level approval lasts (D-25).
+enum ConsentScope {
+  CONSENT_SCOPE_UNSPECIFIED = 0;
+  CONSENT_SCOPE_ONCE = 1;
+  CONSENT_SCOPE_SESSION = 2;
+  CONSENT_SCOPE_PERSISTENT = 3;  // recorded in the trust store, revocable
+}
+
+// PathClass is an advisory hint about the current network path (PRD R8).
+// Capabilities may adapt quality to it and must function without it.
+enum PathClass {
+  PATH_CLASS_UNSPECIFIED = 0;
+  PATH_CLASS_LAN = 1;
+  PATH_CLASS_PUNCHED = 2;
+  PATH_CLASS_RELAYED = 3;
+}

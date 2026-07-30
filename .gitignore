@@ -1,0 +1,6 @@
+# built binaries
+/oabench/oabench
+
+# Generated protobuf code is deliberately COMMITTED (D-28), so internal/wire
+# is not ignored: a plain `go build` must work on a fresh clone, and wire-format
+# changes belong in review diffs.

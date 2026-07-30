@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package openair.v1;
+
+import "openair/v1/common.proto";
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+// QuiesceRequest asks the peer to throttle bulk transfer while a
+// high-bandwidth capability runs. Priority is enforced here, above the
+// transport, because quic-go exposes no stream prioritisation (D-24).
+//
+// The party that throttles is the sender of the bulk data, which is not
+// necessarily the party starting the high-bandwidth capability -- which is why
+// this is a wire message rather than local policy.
+message QuiesceRequest {
+  // Zero means stop entirely. Implementations should send a non-zero floor: a
+  // multi-hour mirror session would otherwise stall a large transfer for hours.
+  uint32 floor_bytes_per_sec = 1;
+  string reason = 2;  // human-readable, for the session log
+}
+
+message QuiesceRelease {}
+
+// PathInfo is advisory. Capabilities may adapt quality to it and must remain
+// functional without it -- capability parity across paths is required, quality
+// parity is not (PRD R8).
+message PathInfo {
+  uint32 rtt_ms = 1;
+  uint64 bandwidth_bytes_sec = 2;
+  PathClass path_class = 3;
+}

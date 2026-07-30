@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package openair.v1;
+
+import "openair/v1/common.proto";
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+// PairOffer travels out of band, in a QR code or a manually entered short code.
+// It authenticates A to B only; the short authentication string in PairRequest
+// and PairResponse is what authenticates B to A.
+message PairOffer {
+  string device_id = 1;
+  bytes identity_fingerprint = 2;  // SHA-256(identity_public_key)[0:16]
+  repeated string lan_hints = 3;   // "host:port" candidates
+  uint32 proto_version = 4;
+}
+
+// PairRequest and PairResponse carry both public keys per D-20. They are
+// structurally identical but kept distinct so the transcript in PROTOCOL.md
+// section 5.2 can order the nonces by role.
+message PairRequest {
+  bytes identity_public_key = 1;   // 32 bytes
+  bytes privilege_public_key = 2;  // 32 bytes
+  string display_name = 3;
+  string platform = 4;
+  bytes nonce = 5;  // 32 random bytes
+  ProtectionTier protection_tier = 6;
+}
+
+message PairResponse {
+  bytes identity_public_key = 1;
+  bytes privilege_public_key = 2;
+  string display_name = 3;
+  string platform = 4;
+  bytes nonce = 5;
+  ProtectionTier protection_tier = 6;
+}
+
+// PairConfirm is sent by both peers after the user has compared the six-digit
+// short authentication string on each device. Pairing completes only when both
+// send accepted = true.
+message PairConfirm {
+  bool accepted = 1;
+}

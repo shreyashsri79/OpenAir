@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package openair.v1;
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+enum RemotefsMessageType {
+  REMOTEFS_MESSAGE_TYPE_UNSPECIFIED = 0;
+  REMOTEFS_MESSAGE_TYPE_STAT_REQUEST = 1;
+  REMOTEFS_MESSAGE_TYPE_STAT_RESPONSE = 2;
+  REMOTEFS_MESSAGE_TYPE_LIST_REQUEST = 3;
+  REMOTEFS_MESSAGE_TYPE_LIST_RESPONSE = 4;
+  REMOTEFS_MESSAGE_TYPE_READ_REQUEST = 5;
+  REMOTEFS_MESSAGE_TYPE_READ_RESPONSE = 6;
+  REMOTEFS_MESSAGE_TYPE_THUMB_REQUEST = 7;
+  REMOTEFS_MESSAGE_TYPE_THUMB_RESPONSE = 8;
+}
+
+message StatRequest {
+  string path = 1;
+}
+
+// StatResponse wraps FileStat so the response has a distinct message type.
+// PROTOCOL.md section 11.1 named FileStat as both the structure and the
+// response, leaving StatRequest without a declared counterpart.
+message StatResponse {
+  FileStat stat = 1;
+}
+
+message ListRequest {
+  string path = 1;
+  uint32 offset = 2;
+  uint32 limit = 3;
+}
+
+message ListResponse {
+  repeated FileStat entries = 1;
+  bool truncated = 2;  // more remain; re-request at a higher offset
+}
+
+message FileStat {
+  string path = 1;
+  uint64 size = 2;
+  int64 modified_at = 3;
+  bool is_dir = 4;
+  uint32 mode = 5;   // POSIX permission bits, best-effort on Windows
+  string mime = 6;   // sniffed by the source, advisory
+}
+
+// ReadRequest is sent once per stream; the source replies with a ReadResponse
+// envelope followed by raw bytes. One request per stream lets several reads
+// proceed without head-of-line blocking between them.
+message ReadRequest {
+  string path = 1;
+  uint64 offset = 2;
+  uint64 length = 3;
+}
+
+message ReadResponse {
+  uint64 offset = 1;
+  // May be shorter than requested, at end of file or because the source chose
+  // a smaller quantum. Clients must handle short reads.
+  uint64 length = 2;
+  bool eof = 3;
+}
+
+message ThumbRequest {
+  string path = 1;
+  uint32 max_dimension = 2;
+}
+
+message ThumbResponse {
+  string mime = 1;
+  bytes image = 2;
+}

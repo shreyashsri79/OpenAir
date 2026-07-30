@@ -99,13 +99,22 @@ capability stream, is framed as:
   envelope is not forward-compatible by design, because everything else depends
   on parsing it correctly.
 - `capID` (u8) — capability, per Appendix B. `0` is the session layer itself.
-- `msgType` (u16) — message type within that capability.
+- `msgType` (u16) — message type within that capability. Values are enumerated
+  per capability in the schemas (`ControlMessageType`, `FilesMessageType`, and so
+  on in `proto/openair/v1/`). An earlier revision of this document defined the
+  field but never gave it values, which made the envelope unimplementable.
 - `length` (u32) — payload length. Receivers MUST reject `length` greater than
   **16 MiB** with `MESSAGE_TOO_LARGE`. Bulk data is not sent this way (§8.3), so
   no legitimate control message approaches this.
 
 Header is 8 bytes, fixed, unparsed by protobuf, so demultiplexing costs no
 allocation.
+
+**Wire values are not enum values.** proto3 reserves 0 for `UNSPECIFIED`, so
+every enum in the schemas is offset by one from the numbering used in this
+document. The capID byte for `files` is `0x01`; `CAPABILITY_ID_FILES` is `2`.
+Encoders must convert rather than cast. The same applies to `TrustLevel`,
+`ProtectionTier`, `ConsentScope` and `PathClass`.
 
 ### 3.1 Unknown messages
 
@@ -271,10 +280,15 @@ proof is always bound to a single target and a single operation.
 
 ```protobuf
 message Revoke {
-  uint32 new_level = 1;  // 0 = unpaired, 1 = Trusted
-  string reason    = 2;
+  TrustLevel new_level = 1;  // UNPAIRED discards both pinned keys
+  string     reason    = 2;
 }
 ```
+
+`TrustLevel` is a shared ladder — `UNPAIRED` < `TRUSTED` < `OWNED` — used by both
+`Revoke` and `CapabilityGrant`. An earlier revision gave each a bare `uint32`
+with a separate implied scale, which is how a revoke and a grant end up
+disagreeing about what level 1 means.
 
 Sent on the control stream. On receipt the peer MUST immediately stop honouring
 operations above `new_level` and MUST abort in-flight ones that exceed it.
@@ -417,7 +431,7 @@ Quiesce is not instantaneous: up to a congestion window is already in flight.
 message PathInfo {
   uint32 rtt_ms              = 1;
   uint64 bandwidth_bytes_sec = 2;
-  uint32 path_class          = 3;  // 0 = lan, 1 = punched, 2 = relayed
+  PathClass path_class       = 3;  // lan | punched | relayed
 }
 ```
 
@@ -608,6 +622,7 @@ Bulk priority for reads; interactive for metadata.
 
 ```protobuf
 message StatRequest  { string path = 1; }
+message StatResponse { FileStat stat = 1; }
 message ListRequest  { string path = 1; uint32 offset = 2; uint32 limit = 3; }
 
 message FileStat {
@@ -726,6 +741,10 @@ Datagram payload, raw rather than protobuf, because these are tiny and frequent:
 
 The leading `capID` byte demultiplexes datagrams, which have no stream to
 identify them by.
+
+**`input` is the one capability with no protobuf messages at all**, and that is
+deliberate: these events are tiny and frequent, so protobuf framing would cost
+more than the payload, and a fixed layout demultiplexes without allocating.
 
 | kind | body |
 |---|---|

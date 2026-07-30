@@ -22,6 +22,13 @@ Purpose: Desktop GUI (Linux/macOS/Windows) wrapping the Go transfer engine.
 - `internal/sender/sender.go` — send-side logic used by the GUI.
 - `internal/sender/discover.go` — peer discovery for GUI sender (replaces old `discoverAndroid.go`, removed — see decisions log if a rationale entry exists, otherwise log why on next touch).
 
+## proto/ and internal/wire/ — executable wire schemas
+Purpose: `docs/PROTOCOL.md` in compilable form. `proto/openair/v1/` holds one file per capability plus `common.proto` for shared enums; `internal/wire/` holds committed generated Go (D-28). Root `buf.yaml` defines the workspace, `buf.gen.yaml` the codegen. `buf lint` uses STANDARD; `buf breaking` guards PRD R32's mixed-version compatibility mechanically.
+- `input` (capID 5) has no schema by design — raw datagram encoding, PROTOCOL.md section 13.
+- Bulk chunk frames have no schema either: a `files` data stream opens with `StreamInit` then carries raw 12-byte-header frames inherited from v1.0.
+- **Enum values are offset by one from wire values**, because proto3 reserves 0 for `UNSPECIFIED`. Encoders convert; they must not cast.
+- Writing these found six defects in the spec, corrected in the same commit — see D-34.
+
 ## docs/PROTOCOL.md — normative wire specification
 Purpose: the versioned wire format, spec-first per HLD principle 4. Covers all four phases: envelope, session establishment, pairing, authorisation and flow control; `files` and `clipboard` (Phase 1); discovery, rendezvous, relay and connection establishment (Phase 2); `remotefs` and `notifications` (Phase 3); `input` and `mirror` (Phase 4). Section 14 (`mirror`) is provisional pending D-9. Where code and this file disagree, the spec is right and the code is a bug. No implementation exists yet.
 

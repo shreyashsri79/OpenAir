@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package openair.v1;
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+enum FilesMessageType {
+  FILES_MESSAGE_TYPE_UNSPECIFIED = 0;
+  FILES_MESSAGE_TYPE_TRANSFER_OFFER = 1;
+  FILES_MESSAGE_TYPE_TRANSFER_ACCEPT = 2;
+  FILES_MESSAGE_TYPE_STREAM_INIT = 3;
+  FILES_MESSAGE_TYPE_CHUNK_MANIFEST = 4;
+  FILES_MESSAGE_TYPE_TRANSFER_COMPLETE = 5;
+  FILES_MESSAGE_TYPE_TRANSFER_CANCEL = 6;
+  FILES_MESSAGE_TYPE_TRANSFER_PROGRESS = 7;
+}
+
+message TransferOffer {
+  string transfer_id = 1;  // random, 16 bytes base32
+  repeated FileMeta files = 2;
+  uint64 total_bytes = 3;
+  // Data streams the sender intends to open. Measurement (D-13, D-33) shows
+  // more streams never help QUIC and cost 2.2x on Windows at four; senders
+  // should default to one or two and treat higher values as a tuning escape.
+  uint32 stream_count = 4;
+  uint64 chunk_size = 5;
+}
+
+message FileMeta {
+  // Relative, forward slashes. Receivers must reject absolute paths, any
+  // component equal to "..", and anything resolving outside the destination
+  // root. Path traversal is the obvious attack on a file transfer protocol.
+  string path = 1;
+  uint64 size = 2;
+  int64 modified_at = 3;
+  bytes sha256 = 4;  // whole-file digest; empty if not computed
+}
+
+message TransferAccept {
+  string transfer_id = 1;
+  bool accepted = 2;
+  repeated uint64 have_chunks = 3;  // verified chunk indices, for resume
+}
+
+// StreamInit is the single enveloped message opening a data stream. Everything
+// after it on that stream is raw chunk frames -- a 12-byte header
+// (uint64 offset, uint32 size, little-endian) followed by the data, inherited
+// byte-for-byte from v1.0. Chunk data is deliberately not protobuf.
+message StreamInit {
+  string transfer_id = 1;
+}
+
+// ChunkManifest carries the per-chunk digests. They live here rather than in
+// the chunk frame so the hot path stays 12 bytes.
+message ChunkManifest {
+  string transfer_id = 1;
+  uint64 chunk_size = 2;
+  repeated bytes chunk_sha256 = 3;  // 32 bytes each, in order
+}
+
+message TransferComplete {
+  string transfer_id = 1;
+  bool ok = 2;
+  repeated uint64 failed_chunks = 3;
+}
+
+message TransferCancel {
+  string transfer_id = 1;
+  string reason = 2;
+  // Default false: partial data and the verified-chunk set are kept, because a
+  // cancel on a flaky link is usually a prelude to retrying.
+  bool discard_partial = 3;
+}
+
+message TransferProgress {
+  string transfer_id = 1;
+  uint64 bytes_received = 2;
+  uint64 chunks_verified = 3;
+}

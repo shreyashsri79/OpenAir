@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package openair.v1;
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+enum ClipboardMessageType {
+  CLIPBOARD_MESSAGE_TYPE_UNSPECIFIED = 0;
+  CLIPBOARD_MESSAGE_TYPE_PUSH = 1;
+}
+
+// ClipboardPush is the manual path, guaranteed on every platform. Automatic
+// sync is opt-in and best-effort where OS policy restricts background clipboard
+// reads (PRD R19). Content must not be persisted by relays or logged in
+// plaintext (PRD R20).
+message ClipboardPush {
+  string mime = 1;  // "text/plain; charset=utf-8" initially
+  bytes content = 2;
+  int64 origin_ts = 3;
+  string origin_tag = 4;  // suppresses echo loops in auto-sync mode
+}

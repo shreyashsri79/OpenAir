@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package openair.v1;
+
+import "openair/v1/common.proto";
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+// AuthProof accompanies every Owned-level request. The signature is made by the
+// privilege key, which is only available while an unlock session is live
+// (D-18, D-19, D-30).
+//
+// Signed input, concatenated:
+//   "openair-owned-v1" || target_device_id || cap_id || msg_type
+//                      || nonce || issued_at
+//
+// Binding to target_device_id stops a proof captured by one peer being replayed
+// against another; binding to cap_id and msg_type stops a proof for a file read
+// being reused to start a screen mirror.
+message AuthProof {
+  bytes nonce = 1;      // 32 random bytes, fresh per request
+  int64 issued_at = 2;  // unix milliseconds; verifier allows +/- 60s
+  bytes signature = 3;  // Ed25519
+}
+
+// Revoke narrows a peer's access, taking effect mid-session (PRD R5).
+// TRUST_LEVEL_UNPAIRED additionally requires discarding both pinned keys.
+message Revoke {
+  TrustLevel new_level = 1;
+  string reason = 2;
+}
+
+// CapabilityGrant widens access. Sent by the device granting it, never in
+// response to a request, so a peer cannot ask to be promoted (PRD R3).
+message CapabilityGrant {
+  repeated CapabilityId cap_ids = 1;
+  TrustLevel level = 2;
+}
+
+// ConsentRequest asks a Trusted-level peer's user for approval (D-25).
+message ConsentRequest {
+  string request_id = 1;
+  CapabilityId cap_id = 2;
+  // Shown to the user verbatim. Implementations must not substitute a generic
+  // string; it is the only thing telling them what they are approving.
+  string operation = 3;
+  ConsentScope requested_scope = 4;
+}
+
+message ConsentResponse {
+  string request_id = 1;
+  bool granted = 2;
+  ConsentScope scope = 3;  // may narrow requested_scope, never widen it
+}
+
+// SessionAnnounce precedes the first Owned-level operation and any use of
+// input or mirror, so the accessed device can show an indicator and log it
+// (PRD R4).
+message SessionAnnounce {
+  string session_id = 1;
+  repeated CapabilityId cap_ids = 2;
+  string purpose = 3;
+  bool owned_level = 4;
+}
+
+message SessionEnd {
+  string session_id = 1;
+  string reason = 2;
+}
+
+// SessionKill is a courtesy notification, not the enforcement. A local user
+// killing a session takes effect by the accessed device refusing further
+// operations and resetting streams, so a misbehaving peer cannot ignore it.
+message SessionKill {
+  string session_id = 1;
+}

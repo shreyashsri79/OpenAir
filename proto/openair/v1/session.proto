@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package openair.v1;
+
+import "openair/v1/common.proto";
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+// ControlMessageType enumerates msgType values for capID 0 (control).
+// PROTOCOL.md defines the envelope's msgType field but never enumerated its
+// values; these are that enumeration.
+enum ControlMessageType {
+  CONTROL_MESSAGE_TYPE_UNSPECIFIED = 0;
+  CONTROL_MESSAGE_TYPE_HELLO = 1;
+  CONTROL_MESSAGE_TYPE_PAIR_OFFER = 2;
+  CONTROL_MESSAGE_TYPE_PAIR_REQUEST = 3;
+  CONTROL_MESSAGE_TYPE_PAIR_RESPONSE = 4;
+  CONTROL_MESSAGE_TYPE_PAIR_CONFIRM = 5;
+  CONTROL_MESSAGE_TYPE_AUTH_PROOF = 6;
+  CONTROL_MESSAGE_TYPE_REVOKE = 7;
+  CONTROL_MESSAGE_TYPE_CAPABILITY_GRANT = 8;
+  CONTROL_MESSAGE_TYPE_CONSENT_REQUEST = 9;
+  CONTROL_MESSAGE_TYPE_CONSENT_RESPONSE = 10;
+  CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE = 11;
+  CONTROL_MESSAGE_TYPE_SESSION_END = 12;
+  CONTROL_MESSAGE_TYPE_SESSION_KILL = 13;
+  CONTROL_MESSAGE_TYPE_QUIESCE_REQUEST = 14;
+  CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE = 15;
+  CONTROL_MESSAGE_TYPE_PATH_INFO = 16;
+}
+
+// Hello is exchanged by both peers immediately after the QUIC handshake.
+// Neither may send anything else until it has both sent and received one.
+message Hello {
+  uint32 proto_version = 1;
+  string device_id = 2;  // must match the DeviceID derived from the TLS key
+  string display_name = 3;
+  string platform = 4;  // "linux" | "windows" | "android" | "darwin"
+  repeated Capability capabilities = 5;
+  ProtectionTier protection_tier = 6;
+}
+
+// Capability advertises one capability and the highest version supported.
+// The effective version is the lower of the two peers' values.
+message Capability {
+  CapabilityId id = 1;
+  uint32 version = 2;
+}

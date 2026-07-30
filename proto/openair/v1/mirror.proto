@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package openair.v1;
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+// PROVISIONAL. ADR-4 (D-9) is open. The framing here reflects the current
+// leaning -- stream-per-frame with RESET_STREAM -- which D-24 made favourite by
+// removing the scheduling argument for datagrams. Expect this to change once
+// the D-9 spike runs.
+enum MirrorMessageType {
+  MIRROR_MESSAGE_TYPE_UNSPECIFIED = 0;
+  MIRROR_MESSAGE_TYPE_START = 1;
+  MIRROR_MESSAGE_TYPE_STOP = 2;
+  MIRROR_MESSAGE_TYPE_REQUEST_IDR = 3;
+  MIRROR_MESSAGE_TYPE_BITRATE_HINT = 4;
+  MIRROR_MESSAGE_TYPE_STATS = 5;
+  MIRROR_MESSAGE_TYPE_FRAME_HEADER = 6;
+}
+
+// MirrorStart triggers the quiesce of flow.proto automatically: the source
+// requests bulk throttling for the session's duration and releases on stop.
+message MirrorStart {
+  uint32 width = 1;
+  uint32 height = 2;
+  uint32 fps = 3;
+  string codec = 4;  // "h264" initially
+  uint32 max_bitrate = 5;  // bytes/sec
+  uint32 display_id = 6;
+}
+
+message MirrorStop {}
+
+message RequestIdr {}
+
+message BitrateHint {
+  uint32 bytes_per_sec = 1;
+}
+
+message MirrorStats {
+  uint32 frames_decoded = 1;
+  uint32 frames_dropped = 2;
+  uint32 decode_ms_p95 = 3;
+  uint32 jitter_ms = 4;
+}
+
+// FrameHeader opens each frame's own stream; the raw encoded frame follows,
+// then a clean close. A frame that goes stale before it is fully sent is
+// abandoned with RESET_STREAM rather than retransmitted.
+message FrameHeader {
+  uint64 seq = 1;
+  int64 captured_at = 2;  // source monotonic microseconds
+  bool keyframe = 3;
+}

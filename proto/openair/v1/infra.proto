@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package openair.v1;
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+// Phase 2 infrastructure: rendezvous, relay and hole punching. These are spoken
+// to servers rather than to peers, so they are not capability messages and
+// carry no capID.
+
+// Registration maps a DeviceID to its current endpoints (PRD R7). The server
+// must verify the signature before storing, so only the key holder can move a
+// device's endpoints, and must reject expiries more than 10 minutes out.
+//
+// Signed input:
+//   "openair-rendezvous-v1" || device_id || endpoints (in order)
+//                           || relay_home || issued_at || expires_at
+message Registration {
+  string device_id = 1;
+  repeated string endpoints = 2;  // "ip:port", reflexive and local
+  string relay_home = 3;
+  int64 issued_at = 4;
+  int64 expires_at = 5;
+  bytes signature = 6;  // Ed25519 by the identity key
+}
+
+message LookupRequest {
+  string device_id = 1;
+}
+
+message LookupResponse {
+  Registration registration = 1;
+  bool found = 2;
+}
+
+// Relay authentication. The relay forwards ciphertext and holds no keys; it
+// learns which DeviceIDs talk to each other, when, and how much, but not what.
+message RelayHello {
+  string device_id = 1;
+  bytes nonce = 2;
+}
+
+message RelayChallenge {
+  bytes server_nonce = 1;
+}
+
+message RelayAuth {
+  bytes signature = 1;  // Ed25519 over both nonces
+}
+
+// PunchRequest and PunchReady coordinate simultaneous UDP hole punching,
+// signalled over the rendezvous server or an existing relay session.
+message PunchRequest {
+  string target_device_id = 1;
+  repeated string candidates = 2;
+  bytes punch_token = 3;  // 16 random bytes, echoed to correlate attempts
+  // Both sides begin spraying at this instant, within about 50 ms. This is what
+  // makes symmetric-NAT traversal work often enough to matter.
+  int64 start_at = 4;
+}
+
+message PunchReady {
+  repeated string candidates = 1;
+  bytes punch_token = 2;
+}

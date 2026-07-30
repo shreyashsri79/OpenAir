@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package openair.v1;
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+enum NotificationsMessageType {
+  NOTIFICATIONS_MESSAGE_TYPE_UNSPECIFIED = 0;
+  NOTIFICATIONS_MESSAGE_TYPE_POSTED = 1;
+  NOTIFICATIONS_MESSAGE_TYPE_REMOVED = 2;
+  NOTIFICATIONS_MESSAGE_TYPE_DISMISS = 3;
+  NOTIFICATIONS_MESSAGE_TYPE_ACTION_INVOKE = 4;
+}
+
+// Posted mirrors a notification from source to sink. Per-app filtering happens
+// on the *source* (PRD R22), before this message is constructed, so excluded
+// content never crosses the wire and never reaches a relay. There is
+// deliberately no filter-configuration message: putting filtering on the wire
+// would mean the filtered content had already left the device.
+message Posted {
+  string key = 1;  // opaque, stable, source-assigned
+  string app_id = 2;
+  string app_name = 3;
+  string title = 4;
+  string body = 5;
+  bytes icon_png = 6;  // sources should cap to 64x64
+  int64 posted_at = 7;
+  string category = 8;  // "msg" | "call" | "alarm" | "progress" | ""
+  repeated NotificationAction actions = 9;
+}
+
+message NotificationAction {
+  string action_id = 1;
+  string label = 2;
+  bool accepts_text = 3;  // inline reply
+}
+
+message Removed {
+  string key = 1;
+}
+
+// Dismiss flows sink to source, giving dismiss-on-one-dismisses-everywhere.
+// Sinks must tolerate a Removed for a key they never saw.
+message Dismiss {
+  string key = 1;
+}
+
+message ActionInvoke {
+  string key = 1;
+  string action_id = 2;
+  string text = 3;
+}

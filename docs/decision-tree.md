@@ -43,6 +43,7 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-31 | ADR-5 | Does gomobile actually bind quic-go? | **accepted** — yes, 8.4 MB/ABI |
 | D-32 | ADR-8 | When is the Windows work done? | **accepted** — deferred to Phase 2 |
 | D-33 | ADR-8 | What does Windows actually cost? | evidence — 1450 Mb/s at 1 stream, 647 at 4 |
+| D-34 | — | Are the wire schemas implementable? | **accepted** — 11 protos; found 6 spec defects |
 
 **Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
 
@@ -716,3 +717,22 @@ Two harness defects this run exposed, both fixed in the same commit:
 - Results were labelled `gso: "on"` on Windows. The field read the `QUIC_GO_DISABLE_GSO` environment variable on every platform rather than the platform's actual capability, and Windows has no offload to enable. Now reports `"none"` off Linux.
 
 Consequences: ADR-8 keeps its Phase 2 slot (D-32) with the throughput justification weakened and the CPU justification unmeasured. The stream-count finding feeds directly into the `files` capability's defaults. A re-run with the fixed binary would settle whether Windows QUIC is CPU-bound or link-bound at these rates, which is the remaining input to ADR-8's cost/benefit and to PRD R30.
+
+## D-34: Wire schemas written; compiling them found six defects in PROTOCOL.md
+Date: 2026-07-30
+Status: accepted
+Context: `PROTOCOL.md` was written as prose in a single sitting and declared normative. Prose specifications hide ambiguity that a compiler does not, and it was recorded at the time that bugs were expected. D-28 chose `buf` with committed generated code; this entry is the result of actually doing it.
+Decision: `proto/openair/v1/` holds eleven schema files — one per capability plus `common.proto` for shared enums — generated into `internal/wire/` and committed. `buf lint` passes STANDARD clean, generated Go compiles and vets, and a round-trip test guards the types. This also creates the root module `github.com/shreyashsri79/openair` decided in D-26; `openair-gui` and `oabench` remain separate modules and are unaffected.
+
+Defects found by compiling, all corrected in the same commit:
+
+1. **`msgType` had no values anywhere.** Section 3 defined the field as "message type within that capability" and nothing ever enumerated it. The envelope was literally unimplementable as specified. Now enumerated per capability — `ControlMessageType`, `FilesMessageType`, and so on.
+2. **Enum zero-value collisions.** The spec numbered `Revoke.new_level` from 0 for unpaired and `PathInfo.path_class` from 0 for LAN. proto3 reserves 0 for `UNSPECIFIED`, so every enum is now offset by one and **enum values are not wire values**. That trap is now documented in section 3, the schema README and `common.proto`, because a cast where a conversion belongs would be a silent, protocol-level bug.
+3. **`StatRequest` had no response message.** `FileStat` was used as both the data structure and the implied response, leaving the request without a declared counterpart. Added `StatResponse`.
+4. **Trust levels were bare `uint32` on two messages with separately implied scales.** `Revoke.new_level` and `CapabilityGrant.level` each carried their own undocumented numbering — which is exactly how a revoke and a grant come to disagree about what level 1 means. Both now use a shared `TrustLevel` ladder.
+5. **`Hello.protection_tier` was a bare `uint32`** whose meaning lived only in section 7.3 prose. Now the `ProtectionTier` enum, so tier 3 blocking Owned access is enforceable by type rather than by comment.
+6. **`input` having no protobuf messages read as an omission rather than a decision.** It is deliberate — the events are tiny and frequent, protobuf framing would exceed the payload, and a fixed layout demultiplexes without allocating. Now stated as such in section 13 and the schema README.
+
+Consequences: `buf breaking` can now run against the previous commit in CI, which is what mechanically enforces PRD R32's mixed-version compatibility — the ignore-unknown rules in section 3.1 are designed to survive additive change, and `buf` catches the non-additive kind before it ships. Golden vectors for the 8-byte envelope (HLD section 5) are still outstanding; the round-trip test covers the protobuf types only. `mirror.proto` carries a provisional marker matching section 14, pending D-9.
+
+Worth recording for its own sake: every one of the six defects is the kind that survives any amount of proof-reading and dies immediately on contact with a compiler. Spec-first (HLD principle 4) only pays if "the spec" is something a machine can check.
