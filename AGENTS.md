@@ -43,6 +43,8 @@ Update this file whenever you add/move/rename a file, change a protocol/format, 
 - Commit docs updates in the same commit as the code change they describe, not batched separately later.
 - If a decision affects another module you didn't touch, still log it in `docs/decision-tree.md` — the log is shared, not per-agent.
 
+**Exception when several agents run concurrently on one task wave.** The two rules above assume one agent at a time. They do not survive parallelism: concurrent appends to `docs/decision-tree.md` conflict, and `D-<n>` numbering collides. When you are one worker among several, do not edit `docs/decision-tree.md` or `docs/functionality.md`, and do not commit — the shared checkout means concurrent commits race the git index. Report what you changed and what deserves logging; the orchestrator writes the entries and commits. `docs/BUILD-PLAN.md` §0 has the full protocol.
+
 ## 4. Work on `main` — no agent branches, no worktrees
 
 Commit directly to `main` in the primary checkout. Do not create a per-agent branch, and do not create a git worktree, unless the maintainer asks for one by name in that task.

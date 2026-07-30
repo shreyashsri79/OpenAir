@@ -35,6 +35,7 @@ Purpose: OpenAir 2.0. Per D-26 this is one module; `openair-gui` and `oabench` s
 - `internal/session` — envelope framing, capability negotiation, authorisation middleware, quiesce arbitration (D-24).
 - `internal/caps/{files,clipboard}` — Phase 1 capabilities.
 - `internal/wire` — generated protobuf, committed (D-28).
+- `internal/{identity,session,caps,conn}/types.go` — the shared Phase 1 contracts (`DeviceID`, `Identity`, `TrustStore`, `Envelope`, `Session`, `Stream`, `Capability`, `Dialer`). Defined ahead of implementation so parallel agents cannot invent incompatible boundaries; bodies panic where a task will fill them in.
 
 ## proto/ and internal/wire/ — executable wire schemas
 Purpose: `docs/PROTOCOL.md` in compilable form. `proto/openair/v1/` holds one file per capability plus `common.proto` for shared enums; `internal/wire/` holds committed generated Go (D-28). Root `buf.yaml` defines the workspace, `buf.gen.yaml` the codegen. `buf lint` uses STANDARD; `buf breaking` guards PRD R32's mixed-version compatibility mechanically.

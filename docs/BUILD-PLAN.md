@@ -9,6 +9,57 @@ model to assign. The wave map says what can run simultaneously.
 
 ---
 
+## 0. Running this
+
+### If you were told "do wave N" — you are the orchestrator
+
+1. Confirm the previous wave is done. Waves are barriers; a half-finished
+   dependency produces agents that build against interfaces that then change.
+2. Spawn **one agent per task** in the wave, concurrently, assigning the model
+   by tier (§2). Give each agent its task ID, its "Read" list verbatim, and §0's
+   worker rules below. Do not paste this whole document into an agent prompt.
+3. As each reports, verify before accepting: `go build ./... && go vet ./... &&
+   go test ./...`, plus `GOOS=windows go build ./...`. Read the diff against the
+   spec section the agent was given. An agent reporting success has not been
+   verified by anyone yet.
+4. **You** update `docs/functionality.md` and write any `docs/decision-tree.md`
+   entries, then commit. Workers do neither — see below.
+
+Do not delegate **X1 (BBR)**. A congestion controller that is subtly wrong shows
+up as a performance regression nobody can localise months later.
+
+### If you were told "do task M1c" (or similar) — you are a worker
+
+- Read `AGENTS.md`, then **only** the sections in your task's "Read" list. Do not
+  read `decision-tree.md` or `PROTOCOL.md` end to end; both are reference works
+  and reading either in full spends your context before you write a line.
+- Implement against the interfaces already defined in `internal/*/types.go`
+  (see below). If one is wrong, say so in your report — do not change it
+  silently, because other agents are compiling against it right now.
+- Write tests. A milestone without tests is not done (§1).
+- **Do not commit.** Multiple agents share one checkout — worktrees and branches
+  are forbidden by AGENTS.md §4 — so concurrent commits race the git index.
+- **Do not edit `docs/decision-tree.md` or `docs/functionality.md.`** Concurrent
+  appends conflict and entry numbering collides. Report instead.
+- Report back: what you built, which files, any decision you made that deserves
+  a log entry, and **anything in the spec that turned out to be wrong**. That
+  last one is expected rather than exceptional — compiling the schemas found six
+  defects in `PROTOCOL.md` (D-34), and more will surface during implementation.
+
+### Shared interfaces are already defined
+
+`internal/identity/types.go`, `internal/session/types.go`,
+`internal/caps/types.go` and `internal/conn/types.go` hold the contracts every
+Phase 1 task compiles against — `DeviceID`, `Identity`, `TrustStore`,
+`Envelope`, `Session`, `Stream`, `Capability`, `Dialer`, `Listener`.
+
+They exist so parallel agents cannot invent incompatible boundaries. Function
+bodies are `panic("M1a: unimplemented")` where a task will fill them in; the
+signatures are the agreement. Changing one is a cross-task decision and belongs
+with the orchestrator.
+
+---
+
 ## 1. Rules this plan follows
 
 **Vertical slices, not layers.** The architecture is layered — identity, session,
@@ -35,9 +86,9 @@ shaped network and their numbers are in D-13, D-17 and D-33.
 
 | Tier | Meaning | Assign to |
 |---|---|---|
-| **T1 · Mechanical** | Fully specified, little judgment. Porting, wiring, codegen, adapters against a fixed interface. | Fast/cheap model |
-| **T2 · Standard** | Normal implementation. Design choices exist but sit inside a settled contract. | Mid model |
-| **T3 · Deep** | Subtle correctness: concurrency, crypto, protocol state machines, or a design still open. Failure is silent and expensive. | Strongest model, and review the result |
+| **T1 · Mechanical** | Fully specified, little judgment. Porting, wiring, codegen, adapters against a fixed interface. | Sonnet 5 |
+| **T2 · Standard** | Normal implementation. Design choices exist but sit inside a settled contract. | Opus 5 |
+| **T3 · Deep** | Subtle correctness: concurrency, crypto, protocol state machines, or a design still open. Failure is silent and expensive. | Opus 5 |
 
 A T3 task assigned to a cheap model is how you get a protocol that looks right
 and is wrong. A T1 task on an expensive model is only wasted money — pick the
@@ -122,10 +173,10 @@ Splits into four tasks that can run at once, then one integration:
 
 | Task | Tier | Package | Read |
 |---|---|---|---|
-| **M1a** Envelope & framing | T2 | `internal/session` | PROTOCOL.md §0, §3, §10 · `internal/wire/` · D-34 |
-| **M1b** Identity & TLS | T2 | `internal/identity` | PROTOCOL.md §1, §2 · **port `oabench/bench/tlsutil.go`** · D-7 |
-| **M1c** Chunk engine | T2 | `internal/caps/files` | PROTOCOL.md §8 · **port `oabench/bench/{framing,transfer,quic}.go`** · D-13, D-33 |
-| **M1d** Dial & accept | T1 | `internal/conn` | PROTOCOL.md §1 · `oabench/bench/quic.go` for Config values |
+| **M1a** Envelope & framing | T2 | `internal/session` | PROTOCOL.md §0, §3, §10 · `internal/wire/` · D-34 · implement `EncodeEnvelope`/`DecodeEnvelope` in `session/types.go` |
+| **M1b** Identity & TLS | T2 | `internal/identity` | PROTOCOL.md §1, §2 · **port `oabench/bench/tlsutil.go`** · D-7 · implement `Identity` + `TrustStore` from `identity/types.go` |
+| **M1c** Chunk engine | T2 | `internal/caps/files` | PROTOCOL.md §8 · **port `oabench/bench/{framing,transfer,quic}.go`** · D-13, D-33 · implement `caps.Capability` |
+| **M1d** Dial & accept | T1 | `internal/conn` | PROTOCOL.md §1 · `oabench/bench/quic.go` for Config values · implement `Dialer.DialAddr` + `Listener` |
 | **M1e** Integration & CLI | T2 | `cmd/openair` | all of the above, after they land |
 
 **Tests.** Golden vectors for the envelope (shared with X4). Chunk plan covers
