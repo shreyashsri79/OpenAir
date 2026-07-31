@@ -110,6 +110,15 @@ func (s quicStream) Reset(code uint32) {
 	s.st.CancelRead(quic.StreamErrorCode(code))
 }
 
+// inbound is one queued message plus the authorisation decision made for it on
+// the control loop. The decision travels with the message rather than being
+// recomputed in the queue goroutine, because the proof it rests on has already
+// been spent by then (§6, auth.go).
+type inbound struct {
+	env   Envelope
+	owned bool
+}
+
 // --- session -----------------------------------------------------------------
 
 type sess struct {
@@ -129,7 +138,14 @@ type sess struct {
 	version uint32          // effective protocol version: min of the two
 	caps    map[byte]uint32 // negotiated capID -> effective capability version
 
-	queues map[byte]chan Envelope
+	queues map[byte]chan inbound
+
+	// auth is §6's verifier: the proofs this peer has offered and the nonces it
+	// has already spent. See auth.go.
+	auth *authVerifier
+	// haveRecord reports that Config.PeerLookup produced a stored record for
+	// this peer, so peer.Level is trust-store truth rather than a zero value.
+	haveRecord bool
 
 	closeOnce sync.Once
 	closeErr  error
@@ -183,7 +199,8 @@ func newSession(ctx context.Context, tr transport, cfg Config) (Session, error) 
 		cancel:   cancel,
 		peer:     cfg.Peer,
 		caps:     map[byte]uint32{},
-		queues:   map[byte]chan Envelope{},
+		queues:   map[byte]chan inbound{},
+		auth:     newAuthVerifier(cfg.Local.DeviceID(), nil),
 		done:     make(chan struct{}),
 	}
 	for id, h := range cfg.Handlers {
@@ -265,6 +282,29 @@ func (s *sess) exchangeHello(ctx context.Context, derived identity.DeviceID, pee
 		s.peer.Platform = remote.Platform
 	}
 	s.peer.ProtectionTier = ProtectionTierFromWire(remote.ProtectionTier)
+
+	// Hello says who the peer claims to be; the trust store says what it is
+	// allowed to do. The accepting side has no pinned record until here -- a
+	// listener does not know who is calling until Hello arrives -- so this is
+	// where the stored keys and level join the session. Without it the pinned
+	// privilege key would be missing on exactly the side that has to verify
+	// AuthProof against it (§6).
+	if s.cfg.PeerLookup != nil {
+		if stored, ok := s.cfg.PeerLookup(derived); ok {
+			s.peer.PrivilegePublicKey = stored.PrivilegePublicKey
+			s.peer.Level = stored.Level
+			s.peer.GrantedCapabilities = stored.GrantedCapabilities
+			s.peer.AuthPolicy = stored.AuthPolicy
+			s.peer.TokenGrantedAt = stored.TokenGrantedAt
+			if s.peer.DisplayName == "" {
+				s.peer.DisplayName = stored.DisplayName
+			}
+			s.haveRecord = true
+		}
+	} else if len(s.cfg.Peer.PrivilegePublicKey) > 0 {
+		// The dialling side already carries the stored record in Config.Peer.
+		s.haveRecord = true
+	}
 	s.mu.Unlock()
 	return nil
 }
@@ -379,7 +419,7 @@ func (s *sess) startQueues() {
 				continue
 			}
 		}
-		q := make(chan Envelope, capQueueDepth)
+		q := make(chan inbound, capQueueDepth)
 		s.queues[capID] = q
 		go s.serveQueue(capID, q)
 	}
@@ -390,14 +430,15 @@ func (s *sess) startQueues() {
 // request/response round trip on the control stream would deadlock a
 // synchronous dispatcher, and one goroutine per message would lose the ordering
 // that offer/cancel sequences depend on.
-func (s *sess) serveQueue(capID byte, q <-chan Envelope) {
+func (s *sess) serveQueue(capID byte, q <-chan inbound) {
 	h := s.handlers[capID]
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case env := <-q:
-			err := h.Serve(s.ctx, s, env.MsgType, env.Payload)
+		case in := <-q:
+			env := in.env
+			err := h.Serve(withOwned(s.ctx, in.owned), s, env.MsgType, env.Payload)
 			switch {
 			case err == nil:
 			case errors.Is(err, ErrUnknownMsgType):
@@ -435,6 +476,16 @@ func (s *sess) readLoop() {
 }
 
 func (s *sess) dispatch(env Envelope) {
+	if env.CapID == 0 && env.MsgType == MsgAuthProof {
+		// §6's proof is consumed by the session layer, never by a handler: it
+		// authorises the *next* message, and a capability has no way to know
+		// that. Malformed proofs are dropped rather than fatal -- the operation
+		// they would have authorised is refused a moment later for having none.
+		if err := s.auth.receive(env.Payload); err != nil {
+			s.log.Warn("discarding AuthProof", "peer", s.Peer().DeviceID, "err", err)
+		}
+		return
+	}
 	if env.CapID == 0 && !knownControlMsgType(env.MsgType) {
 		// §3.1: capID 0 is a capID we recognise, so an unrecognised msgType
 		// within it is ignored rather than fatal.
@@ -458,8 +509,17 @@ func (s *sess) dispatch(env Envelope) {
 		s.log.Debug("ignoring message with no handler", "capID", env.CapID)
 		return
 	}
+
+	// §6's gate, on the control loop and before the message is queued. Doing it
+	// in the queue goroutine instead would authorise messages concurrently with
+	// each other, and the proofs they spend are single-use.
+	owned, allowed := s.authorizeInbound(s.handlers[env.CapID], env.CapID, env.MsgType)
+	if !allowed {
+		return
+	}
+
 	select {
-	case q <- env:
+	case q <- inbound{env: env, owned: owned}:
 	case <-s.ctx.Done():
 	}
 }
@@ -506,7 +566,18 @@ func (s *sess) serveStream(st Stream) {
 		st.Reset(uint32(CodeCapabilityUnavailable))
 		return
 	}
-	if err := h.ServeStream(s.ctx, s, st, env.MsgType, env.Payload); err != nil {
+	// The same §6 gate as the control path. One caveat, stated rather than
+	// hidden: a proof arriving on the control stream and a capability stream
+	// opened straight after are not ordered against each other by QUIC, so an
+	// Owned-level *stream* opener can race its own proof. No Phase 1 capability
+	// declares Owned, so nothing exercises it; a capability that does will need
+	// its proof on the stream itself (D-57).
+	owned, allowed := s.authorizeInbound(h, env.CapID, env.MsgType)
+	if !allowed {
+		st.Reset(uint32(CodeUnauthorised))
+		return
+	}
+	if err := h.ServeStream(withOwned(s.ctx, owned), s, st, env.MsgType, env.Payload); err != nil {
 		if errors.Is(err, ErrUnknownMsgType) {
 			st.Reset(uint32(CodeCapabilityUnavailable))
 			return

@@ -257,7 +257,7 @@ func TestHostileAnnounceCannotRedirectASession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("attacker identity: %v", err)
 	}
-	attackerLn, err := conn.Listen("127.0.0.1:0", attacker, "attacker", "linux", nil, nil)
+	attackerLn, err := conn.Listen("127.0.0.1:0", attacker, "attacker", "linux", nil, conn.ListenOptions{})
 	if err != nil {
 		t.Fatalf("attacker listener: %v", err)
 	}

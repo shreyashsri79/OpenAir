@@ -101,6 +101,7 @@ type DiscoveryOptions struct {
 // Daemon is one running instance.
 type Daemon struct {
 	cfg     Config
+	keyDir  string
 	id      *identity.FileIdentity
 	store   *identity.FileTrustStore
 	pairs   *pairing.Handler
@@ -144,7 +145,21 @@ func New(cfg Config) (*Daemon, error) {
 	if keyDir == "" {
 		keyDir = defaultKeyDir()
 	}
-	id, err := identity.LoadOrCreate(identity.Options{Dir: keyDir, Tier: identity.TierNone})
+	// The tier is read off the disk rather than configured (D-21, D-57). A flag
+	// would let a typo take a device out of Owned silently; the sealed key file
+	// already says which tier it belongs to, and `openair protect` is what
+	// creates one.
+	tier, err := identity.DetectTier(keyDir)
+	if err != nil {
+		return nil, fmt.Errorf("read privilege key: %w", err)
+	}
+	d := &Daemon{}
+	id, err := identity.LoadOrCreate(identity.Options{
+		Dir:             keyDir,
+		Tier:            tier,
+		OnExpiryWarning: func(t identity.DeviceID, at time.Time) { d.onExpiryWarning(t, at) },
+		Logf:            func(format string, args ...any) { cfg.Logf(format, args...) },
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open identity: %w", err)
 	}
@@ -159,8 +174,9 @@ func New(cfg Config) (*Daemon, error) {
 		return nil, fmt.Errorf("create destination directory: %w", err)
 	}
 
-	d := &Daemon{
+	*d = Daemon{
 		cfg:      cfg,
+		keyDir:   keyDir,
 		id:       id,
 		store:    store,
 		started:  time.Now(),
@@ -202,7 +218,11 @@ func New(cfg Config) (*Daemon, error) {
 		files.CapID:     d.files,
 		clipboard.CapID: d.clip,
 	}
-	d.ln, err = conn.Listen(cfg.Listen, id, cfg.DisplayName, platform(), handlers, d.authorize)
+	d.ln, err = conn.Listen(cfg.Listen, id, cfg.DisplayName, platform(), handlers, conn.ListenOptions{
+		Authorize:   d.authorize,
+		PeerLookup:  d.store.Get,
+		OnAuthEvent: d.onAuthEvent,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", cfg.Listen, err)
 	}
@@ -261,6 +281,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.cfg.Logf("device %s listening on %s, writing to %s",
 		d.id.DeviceID().Fingerprint(), d.ln.Addr(), d.cfg.DestDir)
 	d.cfg.Logf("ipc on %s", d.cfg.SocketPath)
+	switch d.id.ProtectionTier() {
+	case identity.TierNone:
+		// D-21 tier 3, said plainly: a user who believes they have unattended
+		// access and does not is worse off than one who was told.
+		d.cfg.Logf("no privilege key here: this device can pair and transfer, but cannot unlock Owned access (run `openair protect`)")
+	case identity.TierPassphrase:
+		d.cfg.Logf("privilege key sealed with a passphrase (tier 2)")
+	case identity.TierKeystore:
+		d.cfg.Logf("privilege key sealed by the platform keystore (tier 1)")
+	}
 	if !clipboard.HaveOS() {
 		d.cfg.Logf("no system clipboard here; inbound pushes will be reported, not pasted")
 	}

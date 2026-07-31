@@ -44,11 +44,10 @@ func runSend(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.DurationVar(&o.timeout, "timeout", 5*time.Second, "how long to look for a named device on the network")
 	fs.StringVar(&o.socket, "socket", "", "daemon IPC socket path")
 	fs.BoolVar(&o.noDaemon, "no-daemon", false, "dial from this process instead of asking the daemon")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterleaved(fs, args)
+	if err != nil {
 		return err
 	}
-
-	rest := fs.Args()
 	if len(rest) < 2 {
 		return fmt.Errorf("usage: openair send [flags] FILE... DEVICE|ADDR")
 	}

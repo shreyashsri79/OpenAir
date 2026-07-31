@@ -72,7 +72,7 @@ type listener struct {
 	displayName string
 	platform    string
 	handlers    map[byte]session.Handler
-	authorize   func(identity.Peer) error
+	opts        ListenOptions
 
 	start   sync.Once
 	results chan acceptResult
@@ -86,14 +86,32 @@ type acceptResult struct {
 	err  error
 }
 
+// ListenOptions carries the decisions a listener cannot make for itself.
+//
+// It is a struct rather than three more parameters because two of the three
+// arrived with M6 and a fourth is foreseeable: an accepting side has to be told
+// who may connect, what the trust store says about them once they have, and
+// where to log the answer.
+type ListenOptions struct {
+	// Authorize gates inbound peers once Hello identifies them; nil accepts
+	// every caller (session.Config.Authorize explains when that is acceptable).
+	Authorize func(identity.Peer) error
+
+	// PeerLookup supplies the stored trust-store record, which is where the
+	// pinned privilege key and the granted trust level come from (§6, D-20).
+	// Nil means the session enforces no trust ladder of its own; see
+	// session.Config.PeerLookup, which explains when that is right.
+	PeerLookup func(identity.DeviceID) (identity.Peer, bool)
+
+	// OnAuthEvent receives every authorisation decision made for an inbound
+	// message, for the local session log PRD R4 requires.
+	OnAuthEvent func(session.AuthEvent)
+}
+
 // Listen binds addr (use ":0" for an ephemeral port) and returns a Listener
 // that hands accepted sessions the given display name, platform and
 // capability handlers.
-//
-// authorize gates inbound peers once Hello identifies them; passing nil
-// accepts every caller (session.Config.Authorize explains when that is
-// acceptable).
-func Listen(addr string, local identity.Identity, displayName, platform string, handlers map[byte]session.Handler, authorize func(identity.Peer) error) (Listener, error) {
+func Listen(addr string, local identity.Identity, displayName, platform string, handlers map[byte]session.Handler, opts ListenOptions) (Listener, error) {
 	tlsConf, err := local.TLSConfig(nil)
 	if err != nil {
 		return nil, err
@@ -111,7 +129,7 @@ func Listen(addr string, local identity.Identity, displayName, platform string, 
 		displayName: displayName,
 		platform:    platform,
 		handlers:    handlers,
-		authorize:   authorize,
+		opts:        opts,
 		results:     make(chan acceptResult),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -183,7 +201,9 @@ func (l *listener) handshake(qc *quic.Conn) {
 		Platform:    l.platform,
 		Handlers:    l.handlers,
 		Initiator:   false,
-		Authorize:   l.authorize,
+		Authorize:   l.opts.Authorize,
+		PeerLookup:  l.opts.PeerLookup,
+		OnAuthEvent: l.opts.OnAuthEvent,
 	})
 	if err != nil {
 		// A refusal that is not a protocol error is the authorize callback

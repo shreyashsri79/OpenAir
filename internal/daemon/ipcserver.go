@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -89,6 +90,12 @@ func (d *Daemon) handle(ctx context.Context, c *client, msgType uint16, payload 
 		d.onPair(ctx, c, payload)
 	case ipc.MsgClipboardRequest:
 		d.onClipboard(ctx, c, payload)
+	case ipc.MsgUnlockRequest:
+		d.onUnlock(c, payload)
+	case ipc.MsgLockRequest:
+		d.onLock(c, payload)
+	case ipc.MsgTrustRequest:
+		d.onTrust(c, payload)
 	default:
 		d.cfg.Logf("ipc: ignoring unknown message type %d", msgType)
 	}
@@ -133,6 +140,17 @@ func (d *Daemon) onStatus(c *client, payload []byte) {
 		Announcing:     d.disco != nil && !d.cfg.NoAnnounce,
 		AutoAccept:     d.cfg.AutoAccept,
 		Subscribers:    uint32(subs),
+		ProtectionTier: session.ProtectionTierToWire(d.id.ProtectionTier()),
+		UnlockedDevices: func() []string {
+			ids := d.id.UnlockedPeers()
+			out := make([]string, 0, len(ids))
+			for _, id := range ids {
+				out = append(out, string(id))
+			}
+			sort.Strings(out)
+			return out
+		}(),
+		KeySwappable: d.id.Swappable(),
 	})
 }
 
@@ -152,12 +170,15 @@ func (d *Daemon) onDeviceList(c *client, payload []byte) {
 	for _, p := range paired {
 		_, open := d.sessionFor(p.DeviceID)
 		dev := &openairv1.DaemonDevice{
-			DeviceId:    string(p.DeviceID),
-			DisplayName: p.DisplayName,
-			Platform:    p.Platform,
-			Paired:      true,
-			Level:       trustLevelToWire(p.Level),
-			SessionOpen: open,
+			DeviceId:            string(p.DeviceID),
+			DisplayName:         p.DisplayName,
+			Platform:            p.Platform,
+			Paired:              true,
+			Level:               trustLevelToWire(p.Level),
+			SessionOpen:         open,
+			ProtectionTier:      session.ProtectionTierToWire(p.ProtectionTier),
+			PrivilegeKeyPinned:  len(p.PrivilegePublicKey) > 0,
+			UnlockedUntilUnixMs: d.unlockedUntilMillis(p.DeviceID),
 		}
 		byID[p.DeviceID] = dev
 		out = append(out, dev)
@@ -273,6 +294,24 @@ func (d *Daemon) confirmPairing(ctx context.Context, sas string, peer pairing.Pe
 
 // acceptTransfer is files.Config.Accept: ask a client, or apply policy.
 func (d *Daemon) acceptTransfer(ctx context.Context, peer identity.Peer, offer files.Offer) (bool, error) {
+	// The unattended path, and the reason M6 exists: an Owned peer that proved
+	// possession of its privilege key for this exact offer does not need a human
+	// (PRD R3, R11). The proof was verified by the session layer before this
+	// call; OwnedFromContext is how that decision reaches here (§6).
+	if peer.Level == identity.LevelOwned && session.OwnedFromContext(ctx) {
+		d.cfg.Logf("accepting %s from owned device %s without asking",
+			offer.TransferID, peer.DeviceID.Fingerprint())
+		d.logAuth("unattended transfer accepted", peer.DeviceID, offer.TransferID)
+		d.broadcast(&openairv1.DaemonEvent{
+			Kind:       openairv1.DaemonEventKind_DAEMON_EVENT_KIND_TRANSFER_STARTED,
+			DeviceId:   string(peer.DeviceID),
+			TransferId: offer.TransferID,
+			BytesTotal: offer.TotalBytes,
+			Text:       "accepted unattended: owned device with a valid auth proof",
+		})
+		return true, nil
+	}
+
 	if d.cfg.AutoAccept {
 		d.cfg.Logf("accepting %s from %s automatically", offer.TransferID, peer.DeviceID.Fingerprint())
 		return true, nil

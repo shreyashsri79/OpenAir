@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -365,5 +366,37 @@ func TestDialAndServeOverARealSocket(t *testing.T) {
 	}
 	if resp.GetDeviceId() != "served" {
 		t.Fatalf("reply = %q, want served", resp.GetDeviceId())
+	}
+}
+
+// TestEveryResponseTypeIsAReply is a schema invariant, and it exists because
+// the failure it catches is silent.
+//
+// A response type missing from isReply is routed as an inbound request, finds no
+// handler, and is dropped -- so the caller that sent the matching request waits
+// for its context to expire and reports a timeout. Nothing logs, nothing
+// errors, and the bug looks like a hung daemon. Adding a message pair to
+// daemon.proto and forgetting this function is a one-line mistake, so it is
+// checked against the schema rather than against a hand-written list.
+func TestEveryResponseTypeIsAReply(t *testing.T) {
+	checked := 0
+	for value, name := range openairv1.DaemonMessageType_name {
+		if !strings.HasSuffix(name, "_RESPONSE") {
+			continue
+		}
+		checked++
+		if !correlated(uint16(value)) {
+			t.Errorf("%s is not routed by request ID: a caller sending its request would hang until its context expired", name)
+		}
+	}
+	if checked < 8 {
+		t.Fatalf("only %d response types were checked; the enum lookup is not finding them", checked)
+	}
+
+	// The converse: a request routed as a reply would never reach a handler.
+	for value, name := range openairv1.DaemonMessageType_name {
+		if strings.HasSuffix(name, "_REQUEST") && correlated(uint16(value)) {
+			t.Errorf("%s is routed as a reply, so no handler would ever see it", name)
+		}
 	}
 }

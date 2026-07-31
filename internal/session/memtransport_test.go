@@ -200,6 +200,11 @@ func newStubIdentity(seed byte) *stubIdentity {
 	}
 }
 
+// publicKey is how the test harness reads a local identity's TLS key without
+// asserting on the concrete type, so a wrapper that adds a privilege key (see
+// auth_test.go) still works with pair.
+func (i *stubIdentity) publicKey() ed25519.PublicKey { return i.pub }
+
 func (i *stubIdentity) DeviceID() identity.DeviceID             { return identity.DeriveDeviceID(i.pub) }
 func (i *stubIdentity) IdentityPublic() ed25519.PublicKey       { return i.pub }
 func (i *stubIdentity) PrivilegePublic() ed25519.PublicKey      { return i.pub }

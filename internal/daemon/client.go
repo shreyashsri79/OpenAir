@@ -140,3 +140,38 @@ func (c *Client) Clipboard(ctx context.Context, target string, push *openairv1.C
 	req := &openairv1.DaemonClipboardRequest{Target: target, Push: push}
 	return c.peer.Do(ctx, ipc.MsgClipboardRequest, req, &resp)
 }
+
+// Unlock starts an unlock session for one peer (D-18, D-30). The credential
+// travels over the local socket; see the note in the daemon's unlock.go for why
+// the daemon does not prompt for it itself.
+func (c *Client) Unlock(ctx context.Context, deviceID string, passphrase, keystoreKEK []byte, neverExpire bool, lifetime time.Duration) (*openairv1.DaemonUnlockResponse, error) {
+	var resp openairv1.DaemonUnlockResponse
+	req := &openairv1.DaemonUnlockRequest{
+		DeviceId:    deviceID,
+		Passphrase:  passphrase,
+		KeystoreKek: keystoreKEK,
+		NeverExpire: neverExpire,
+		LifetimeMs:  lifetime.Milliseconds(),
+	}
+	if err := c.peer.Do(ctx, ipc.MsgUnlockRequest, req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// Lock ends one peer's unlock session, or every session when deviceID is empty.
+func (c *Client) Lock(ctx context.Context, deviceID string) error {
+	var resp openairv1.DaemonLockResponse
+	return c.peer.Do(ctx, ipc.MsgLockRequest, &openairv1.DaemonLockRequest{DeviceId: deviceID}, &resp)
+}
+
+// Trust promotes or demotes a paired device (§6.4). An empty authPolicy leaves
+// the existing one alone.
+func (c *Client) Trust(ctx context.Context, deviceID string, level openairv1.TrustLevel, authPolicy string) (openairv1.TrustLevel, error) {
+	var resp openairv1.DaemonTrustResponse
+	req := &openairv1.DaemonTrustRequest{DeviceId: deviceID, Level: level, AuthPolicy: authPolicy}
+	if err := c.peer.Do(ctx, ipc.MsgTrustRequest, req, &resp); err != nil {
+		return openairv1.TrustLevel_TRUST_LEVEL_UNSPECIFIED, err
+	}
+	return resp.GetLevel(), nil
+}

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"testing"
@@ -25,12 +26,13 @@ const (
 func pair(t *testing.T, cfgA, cfgB Config) (*sess, *sess, *memTransport, *memTransport) {
 	t.Helper()
 
-	idA, _ := cfgA.Local.(*stubIdentity)
-	idB, _ := cfgB.Local.(*stubIdentity)
-	if idA == nil || idB == nil {
-		t.Fatal("pair requires stubIdentity locals")
+	type keyed interface{ publicKey() ed25519.PublicKey }
+	idA, okA := cfgA.Local.(keyed)
+	idB, okB := cfgB.Local.(keyed)
+	if !okA || !okB {
+		t.Fatal("pair requires locals built on stubIdentity")
 	}
-	trA, trB := memTransportPair(idA.pub, idB.pub)
+	trA, trB := memTransportPair(idA.publicKey(), idB.publicKey())
 
 	cfgA.Initiator = true
 	cfgB.Initiator = false

@@ -137,7 +137,11 @@ func (c *Capability) SendWithID(ctx context.Context, sess session.Session, id st
 		StreamCount: uint32(streams),
 		ChunkSize:   chunkSize,
 	}
-	if err := sess.Send(ctx, CapID, MsgTransferOffer, offer); err != nil {
+	// An offer carries an AuthProof when this device has an unlock session live
+	// for the peer (§6). Nothing changes for the transfer itself; what changes
+	// is that an Owned receiver may accept it with nobody watching, rather than
+	// waiting for a human who is not there (M6, PRD R11).
+	if _, err := session.SendOwnedIfUnlocked(ctx, sess, CapID, MsgTransferOffer, offer); err != nil {
 		return err
 	}
 

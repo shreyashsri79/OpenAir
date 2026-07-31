@@ -132,7 +132,8 @@ func receive(ctx context.Context, o recvOptions, stdin io.Reader, stdout io.Writ
 	// capID 0 is registered too, so a peer that revokes this device mid-session
 	// is honoured while the transfer is still running (§6.1).
 	ln, err := conn.Listen(o.listen, id, hostname(), platform(),
-		map[byte]session.Handler{files.CapID: cap, clipboard.CapID: clip, 0: pairHandler}, authorize)
+		map[byte]session.Handler{files.CapID: cap, clipboard.CapID: clip, 0: pairHandler},
+		conn.ListenOptions{Authorize: authorize, PeerLookup: store.Get})
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

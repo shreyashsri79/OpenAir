@@ -40,10 +40,11 @@ func runPair(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.StringVar(&o.keys, "keys", "", "directory holding this device's keys")
 	fs.StringVar(&o.socket, "socket", "", "daemon IPC socket path")
 	fs.BoolVar(&o.noDaemon, "no-daemon", false, "pair from this process instead of asking the daemon")
-	if err := fs.Parse(args); err != nil {
+	rest, err := parseInterleaved(fs, args)
+	if err != nil {
 		return err
 	}
-	if rest := fs.Args(); len(rest) > 0 {
+	if len(rest) > 0 {
 		o.offer = rest[0]
 	}
 
@@ -153,7 +154,7 @@ func pairListen(ctx context.Context, o pairOptions, stdin io.Reader, stdout io.W
 	_ = store
 
 	ln, err := conn.Listen(o.listen, id, hostname(), platform(),
-		map[byte]session.Handler{0: handler}, handler.Authorize)
+		map[byte]session.Handler{0: handler}, conn.ListenOptions{Authorize: handler.Authorize})
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

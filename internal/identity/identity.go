@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // On-disk layout under the identity directory.
@@ -57,18 +58,41 @@ type Options struct {
 	Argon2 Argon2Params
 
 	// KeystoreKEK supplies the 32-byte key-encryption key for TierKeystore,
-	// which Appendix A models as kdf = 0. M1 ships no platform keystore or TPM
-	// binding; this hook is where M6 attaches one. Nil at TierKeystore is
+	// which Appendix A models as kdf = 0. It is called only when the privilege
+	// key must be created; unlocking asks the caller for the KEK again through
+	// UnlockOptions, because that path must run behind a user-presence
+	// challenge and this one runs at first start. Nil at TierKeystore is
 	// ErrNoKeystore rather than a silent downgrade to a weaker tier.
 	KeystoreKEK func() ([]byte, error)
+
+	// OnExpiryWarning, if set, fires DefaultExpiryWarning before an unlock
+	// session lapses, so a long transfer can be extended deliberately rather
+	// than discovered broken (PROTOCOL.md §6.5). It runs on its own goroutine.
+	OnExpiryWarning func(target DeviceID, expires time.Time)
+
+	// WarnBefore overrides DefaultExpiryWarning. Zero means the default; a
+	// negative value disables the warning. Tests use it to keep lifetimes short.
+	WarnBefore time.Duration
+
+	// Now overrides the clock the unlock session uses, for tests that need to
+	// cross a six-hour boundary without waiting six hours. Nil means time.Now.
+	// It does not affect the sweeper, which runs on real time because what it
+	// governs is how long a key stays in memory.
+	Now func() time.Time
+
+	// Logf, if set, receives operational notes that are neither errors returned
+	// to the caller nor silent -- notably a failure to lock the key's pages
+	// into RAM.
+	Logf func(format string, args ...any)
 }
 
 // FileIdentity is an Identity backed by key files in a directory.
 //
 // The identity private key is held in memory for the process lifetime: D-20
-// requires it warm. The privilege private key is never held here at all in M1
-// -- only its sealed bytes and its public half -- so there is nothing for an
-// unlock session to leak before M6 defines one.
+// requires it warm. The privilege private key is held only while an unlock
+// session is live, in pages locked out of swap, and wiped the moment the last
+// session lapses -- see unlock.go, which is where the six-hour token of D-18
+// becomes a concrete key lifetime rather than a policy flag.
 type FileIdentity struct {
 	dir string
 
@@ -80,6 +104,14 @@ type FileIdentity struct {
 	tier          ProtectionTier
 	privilegePub  ed25519.PublicKey // nil at TierNone
 	sealedPrivKey []byte            // Appendix A container, nil at TierNone
+
+	// unlock holds the decrypted privilege key while a session is live, and the
+	// per-peer grants that justify holding it (D-18, D-19, D-30). See unlock.go.
+	unlock          unlockState
+	clock           func() time.Time
+	logf            func(string, ...any)
+	warnBefore      time.Duration
+	onExpiryWarning func(DeviceID, time.Time)
 }
 
 var _ Identity = (*FileIdentity)(nil)
@@ -114,13 +146,21 @@ func LoadOrCreate(opts Options) (*FileIdentity, error) {
 	}
 
 	id := &FileIdentity{
-		dir:          opts.Dir,
-		identityPriv: priv,
-		identityPub:  pub,
-		deviceID:     DeriveDeviceID(pub),
-		cert:         cert,
-		tier:         opts.Tier,
+		dir:             opts.Dir,
+		identityPriv:    priv,
+		identityPub:     pub,
+		deviceID:        DeriveDeviceID(pub),
+		cert:            cert,
+		tier:            opts.Tier,
+		clock:           opts.Now,
+		logf:            opts.Logf,
+		warnBefore:      opts.WarnBefore,
+		onExpiryWarning: opts.OnExpiryWarning,
 	}
+	if id.warnBefore == 0 {
+		id.warnBefore = DefaultExpiryWarning
+	}
+	id.unlock.grants = make(map[DeviceID]*grant)
 	if err := id.loadOrCreatePrivilegeKey(opts); err != nil {
 		return nil, err
 	}
@@ -278,20 +318,13 @@ func (i *FileIdentity) TLSConfigPairing() (*tls.Config, *ObservedKey, error) {
 // Certificate returns the self-signed certificate whose key is the identity key.
 func (i *FileIdentity) Certificate() *tls.Certificate { return i.cert }
 
-// SignOwned is a stub in M1: it always reports ErrLocked, because no unlock
-// session exists yet (M6). The signing input it will use is already fixed by
-// OwnedSigningInput and tested, so M6 adds the session and the signature, not
-// the wire format.
-func (i *FileIdentity) SignOwned(target DeviceID, capID byte, msgType uint16) (nonce []byte, issuedAt int64, sig []byte, err error) {
-	if i.tier == TierNone || i.privilegePub == nil {
-		return nil, 0, nil, ErrNoPrivilegeKey
-	}
-	return nil, 0, nil, ErrLocked
-}
+// SignOwned lives in unlock.go: it needs the unlock session, which is the
+// thing that makes a signature possible at all (D-18, D-19, D-30).
 
-// openPrivilege unseals the privilege key. It is deliberately unexported: an
-// unlock session is M6's design (D-19, D-30) and handing the raw key to callers
-// now would pre-empt it. Tests use it to prove the container round-trips.
+// openPrivilege unseals the privilege key. It is deliberately unexported: the
+// unlock session in unlock.go is the only caller that may hold the result, and
+// handing the raw key to anyone else would put a copy outside the locked pages
+// that exist to bound it. Tests use it to prove the container round-trips.
 func (i *FileIdentity) openPrivilege(passphrase, keystoreKEK []byte) (ed25519.PrivateKey, error) {
 	if i.sealedPrivKey == nil {
 		return nil, ErrNoPrivilegeKey

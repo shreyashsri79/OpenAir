@@ -23,10 +23,10 @@ func TestAccept_AuthorizeRejectsInboundPeer(t *testing.T) {
 
 	var sawPeer identity.Peer
 	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil,
-		func(p identity.Peer) error {
+		ListenOptions{Authorize: func(p identity.Peer) error {
 			sawPeer = p
 			return errNotYou
-		})
+		}})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -82,10 +82,10 @@ func TestAccept_AuthorizeAdmitsInboundPeer(t *testing.T) {
 
 	called := make(chan identity.Peer, 1)
 	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil,
-		func(p identity.Peer) error {
+		ListenOptions{Authorize: func(p identity.Peer) error {
 			called <- p
 			return nil
-		})
+		}})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}

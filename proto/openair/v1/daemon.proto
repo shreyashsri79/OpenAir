@@ -36,6 +36,12 @@ enum DaemonMessageType {
   DAEMON_MESSAGE_TYPE_CLIPBOARD_REQUEST = 14;
   DAEMON_MESSAGE_TYPE_CLIPBOARD_RESPONSE = 15;
   DAEMON_MESSAGE_TYPE_ERROR = 16;
+  DAEMON_MESSAGE_TYPE_UNLOCK_REQUEST = 17;
+  DAEMON_MESSAGE_TYPE_UNLOCK_RESPONSE = 18;
+  DAEMON_MESSAGE_TYPE_LOCK_REQUEST = 19;
+  DAEMON_MESSAGE_TYPE_LOCK_RESPONSE = 20;
+  DAEMON_MESSAGE_TYPE_TRUST_REQUEST = 21;
+  DAEMON_MESSAGE_TYPE_TRUST_RESPONSE = 22;
 }
 
 // DaemonStatusRequest asks what the daemon is and what it is doing.
@@ -56,6 +62,18 @@ message DaemonStatusResponse {
   bool announcing = 10;  // advertising on the LAN (M3)
   bool auto_accept = 11;  // inbound transfers accepted without a prompt
   uint32 subscribers = 12;  // clients currently able to answer a prompt
+
+  // How this device protects its own privilege key (D-21). TIER_NONE means it
+  // holds none and can never initiate Owned-level work.
+  ProtectionTier protection_tier = 13;
+
+  // Devices with a live unlock session right now (D-30's per-peer scope, made
+  // visible: a status that cannot name what is unlocked is not a status).
+  repeated string unlocked_devices = 14;
+
+  // The decrypted privilege key is in pages the kernel may swap out, because
+  // locking them was refused. False in the normal case.
+  bool key_swappable = 15;
 }
 
 // DaemonDeviceListRequest lists what the daemon can see: paired devices from
@@ -73,6 +91,19 @@ message DaemonDevice {
   bool paired = 5;
   TrustLevel level = 6;
   bool session_open = 7;
+
+  // When this peer's unlock session expires, zero if none is live and -1 under
+  // the "never" policy, which is also D-20's always-on designation.
+  int64 unlocked_until_unix_ms = 8;
+
+  // The tier this peer claimed for its own privilege key (D-21). A peer at
+  // TIER_NONE cannot hold Owned, and the local user should be told why.
+  ProtectionTier protection_tier = 9;
+
+  // Whether a privilege public key is pinned for this peer. Pairings made
+  // before either device had one carry no key, and cannot reach Owned until
+  // they are made again.
+  bool privilege_key_pinned = 10;
 }
 
 message DaemonDeviceListResponse {
@@ -136,6 +167,10 @@ enum DaemonEventKind {
   DAEMON_EVENT_KIND_PAIRED = 8;
   DAEMON_EVENT_KIND_REFUSED = 9;
   DAEMON_EVENT_KIND_CLIPBOARD = 10;
+  DAEMON_EVENT_KIND_UNLOCKED = 11;
+  DAEMON_EVENT_KIND_LOCKED = 12;
+  DAEMON_EVENT_KIND_UNLOCK_EXPIRING = 13;  // §6.5's 15-minute notice
+  DAEMON_EVENT_KIND_AUTH_REFUSED = 14;     // an Owned request was turned away
 }
 
 // DaemonEvent is unsolicited: request_id is the request it belongs to when one
@@ -187,6 +222,53 @@ message DaemonClipboardRequest {
 
 message DaemonClipboardResponse {
   uint64 request_id = 1;
+}
+
+// DaemonUnlockRequest starts an unlock session for one peer (D-18, D-30).
+//
+// The credential travels over the local socket rather than being prompted for
+// by the daemon: the daemon has no terminal, and the socket is already the
+// boundary that protects the identity key it holds (D-58).
+message DaemonUnlockRequest {
+  uint64 request_id = 1;
+  string device_id = 2;   // the peer this unlock authorises; scope is per peer
+  bytes passphrase = 3;   // tier 2; empty at tier 1
+  bytes keystore_kek = 4; // tier 1, produced by the shell after a user-presence challenge
+  bool never_expire = 5;  // D-20's always-on designation, not a convenience
+  int64 lifetime_ms = 6;  // zero means the six-hour default
+}
+
+message DaemonUnlockResponse {
+  uint64 request_id = 1;
+  int64 expires_unix_ms = 2;  // zero under the "never" policy
+  ProtectionTier protection_tier = 3;
+  bool key_swappable = 4;
+}
+
+// DaemonLockRequest ends an unlock session immediately. An empty device_id
+// ends every session and wipes the decrypted key.
+message DaemonLockRequest {
+  uint64 request_id = 1;
+  string device_id = 2;
+}
+
+message DaemonLockResponse {
+  uint64 request_id = 1;
+}
+
+// DaemonTrustRequest changes what a paired device is allowed to do: promotion
+// to Owned, demotion to Trusted, or the "never expire" auth policy. It is a
+// local act on this device and never a response to a peer's request (§6.4).
+message DaemonTrustRequest {
+  uint64 request_id = 1;
+  string device_id = 2;
+  TrustLevel level = 3;
+  string auth_policy = 4;  // "timed" | "never"; empty leaves it unchanged
+}
+
+message DaemonTrustResponse {
+  uint64 request_id = 1;
+  TrustLevel level = 2;
 }
 
 // DaemonError is the failure reply to any request. code is a PROTOCOL.md §10

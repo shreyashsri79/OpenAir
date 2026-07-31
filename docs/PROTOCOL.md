@@ -272,6 +272,21 @@ The verifier MUST reject the request unless all hold:
 Binding to `capID` and `msgType` means a proof for a file read cannot be reused
 to start a screen mirror.
 
+**Where the proof travels.** `AuthProof` is sent on the control stream
+immediately before the message it authorises, and the two MUST NOT be
+interleaved with another proof by a concurrent sender. It carries no `capID` or
+`msgType` of its own, so a verifier cannot check it on arrival: it holds
+received proofs and verifies each against the `capID` and `msgType` of the next
+message, consuming the one that verifies. A proof authorises exactly one
+message. Verification MUST complete before the message reaches its capability,
+and a message whose capability requires Owned and for which no proof verifies
+MUST NOT be dispatched (D-57).
+
+A capability whose operations begin on their own stream rather than on the
+control stream cannot use this arrangement: QUIC does not order a new stream
+against the control stream, so such a capability must carry its proof in its own
+stream-opening message. No Phase 1 capability requires Owned, so none does yet.
+
 **Note on token scope.** Whether one local unlock grants access to every paired
 peer or only to one is a local policy question (D-18) and has no wire effect: a
 proof is always bound to a single target and a single operation.
@@ -394,6 +409,12 @@ nobody. Implementations MUST therefore:
   the timer exists to prevent;
 - notify the user **15 minutes before** expiry, so a long transfer can be
   extended deliberately rather than discovered broken.
+
+The one-hour cap is enforced by the **initiator**. Nothing on the wire carries
+an unlock session's expiry, so a verifier cannot compute it; what a verifier
+enforces is that every new Owned request carries a fresh valid proof, which is
+what stops expiry being extended by starting work just before it. An initiator
+MUST abort its own in-flight Owned operations once the cap passes (D-58).
 
 
 ## 7. Flow control

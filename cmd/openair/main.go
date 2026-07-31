@@ -47,6 +47,10 @@ usage:
   openair recv [--listen ADDR] [--dir DIR] [--keys DIR] [--yes] [--no-announce]
   openair send [--keys DIR] FILE... DEVICE|ADDR
   openair clip push DEVICE|ADDR [TEXT]
+  openair protect [--keys DIR]
+  openair unlock DEVICE [--for DURATION] [--never-expire] [--socket PATH]
+  openair lock [DEVICE] [--socket PATH]
+  openair trust DEVICE --owned|--trusted [--never-expire]
 
 commands:
   status    what the daemon is doing
@@ -57,12 +61,22 @@ commands:
   recv      listen for an inbound transfer and write it to --dir
   send      offer FILE... to a device, named or at an explicit host:port
   clip      push this machine's clipboard, or the text you give, to a device
+  protect   create this device's privilege key, sealed with a passphrase
+  unlock    start a six-hour owned session for one device
+  lock      end an owned session now, or all of them
+  trust     grant or take away a paired device's unattended access
 
 With openaird running, pair and send go through it -- one listener, one
 identity, and inbound transfers arrive whether or not a terminal is open. Pass
 --no-daemon to drive a session from this process instead, which is what happens
 anyway when no daemon is reachable. discover and recv are always direct:
 "devices" is the daemon's own view, and openaird replaces recv entirely.
+
+Unattended access is separate from pairing, and takes three steps: "protect"
+once per device to create the privilege key, "trust DEVICE --owned" on the
+machine being reached, and "unlock DEVICE" on the machine reaching it, once per
+six hours. Until all three are done a device is Trusted: files and clipboard
+work, and someone has to approve inbound transfers.
 
 Pair before transferring: one device runs "pair --listen" and shows a code,
 the other is given that code. Both then display six digits, and pairing
@@ -85,6 +99,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runWatch(args[1:], stdin, stdout)
 	case "pair":
 		return runPair(args[1:], stdin, stdout)
+	case "protect":
+		return runProtect(args[1:], stdin, stdout)
+	case "unlock":
+		return runUnlock(args[1:], stdin, stdout)
+	case "lock":
+		return runLock(args[1:], stdout)
+	case "trust":
+		return runTrust(args[1:], stdout)
 	case "discover":
 		return runDiscover(args[1:], stdout)
 	case "recv":

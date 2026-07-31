@@ -30,7 +30,7 @@ func TestDialAccept_CorrectPinnedKey_Succeeds(t *testing.T) {
 	server := newTestIdentity(t)
 	client := newTestIdentity(t)
 
-	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil, nil)
+	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil, ListenOptions{})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestDialAddr_WrongPinnedKey_FailsHandshake(t *testing.T) {
 	client := newTestIdentity(t)
 	wrong := newTestIdentity(t) // a key that is not the server's
 
-	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil, nil)
+	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil, ListenOptions{})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestDialAddr_WrongPinnedKey_FailsHandshake(t *testing.T) {
 
 func TestListener_Addr_ReportsBoundPort(t *testing.T) {
 	server := newTestIdentity(t)
-	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil, nil)
+	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil, ListenOptions{})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestListener_Addr_ReportsBoundPort(t *testing.T) {
 
 func TestListener_Close_UnblocksAccept(t *testing.T) {
 	server := newTestIdentity(t)
-	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil, nil)
+	ln, err := Listen("127.0.0.1:0", server, "server", "linux", nil, ListenOptions{})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}

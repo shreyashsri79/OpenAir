@@ -158,11 +158,62 @@ func runStatus(args []string, stdout io.Writer) error {
 	default:
 		fmt.Fprintf(stdout, "inbound     refused -- nothing is watching; run `openair watch`\n")
 	}
+
+	// Owned access, M6. Tier 3 is stated rather than left blank: a user who
+	// believes they have unattended access and does not is worse off than one
+	// who was told they do not (D-21).
+	switch st.GetProtectionTier() {
+	case openairv1.ProtectionTier_PROTECTION_TIER_KEYSTORE:
+		fmt.Fprintf(stdout, "privilege   sealed by the platform keystore (tier 1)\n")
+	case openairv1.ProtectionTier_PROTECTION_TIER_PASSPHRASE:
+		fmt.Fprintf(stdout, "privilege   sealed with a passphrase (tier 2)\n")
+	default:
+		fmt.Fprintf(stdout, "privilege   none -- this device cannot reach owned access; run `openair protect`\n")
+	}
+	if unlocked := st.GetUnlockedDevices(); len(unlocked) > 0 {
+		names := make([]string, 0, len(unlocked))
+		for _, id := range unlocked {
+			names = append(names, identity.DeviceID(id).Fingerprint())
+		}
+		fmt.Fprintf(stdout, "unlocked    %s\n", strings.Join(names, ", "))
+	} else if st.GetProtectionTier() != openairv1.ProtectionTier_PROTECTION_TIER_UNSPECIFIED &&
+		st.GetProtectionTier() != openairv1.ProtectionTier_PROTECTION_TIER_NONE {
+		fmt.Fprintf(stdout, "unlocked    nothing -- run `openair unlock DEVICE` to act unattended\n")
+	}
+	if st.GetKeySwappable() {
+		fmt.Fprintf(stdout, "warning     the privilege key could not be locked into RAM; it may reach swap\n")
+	}
 	return nil
 }
 
 // runDevices lists what the daemon knows: paired devices, and whatever
 // discovery can currently see.
+// accessOf renders two facts about a paired device that point in opposite
+// directions, which is why they are not merged into one word.
+//
+// The trust level is what *that* device may do *here*: "owned" means this
+// machine will act on its requests unattended. The unlock is what *this* device
+// may do *there*: a six-hour session someone started at this keyboard (D-30).
+// A single "owned/locked" would read as a statement about the peer when it is a
+// statement about us, so the unlock is written as its own clause.
+func accessOf(d *openairv1.DaemonDevice) string {
+	if !d.GetPaired() {
+		return ""
+	}
+	level := "trusted"
+	if d.GetLevel() == openairv1.TrustLevel_TRUST_LEVEL_OWNED {
+		level = "owned"
+	}
+	switch until := d.GetUnlockedUntilUnixMs(); {
+	case until < 0:
+		return level + " +unlocked"
+	case until == 0:
+		return level
+	default:
+		return level + " +unlocked " + time.Until(time.UnixMilli(until)).Round(time.Minute).String()
+	}
+}
+
 func runDevices(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("devices", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -201,8 +252,9 @@ func runDevices(args []string, stdout io.Writer) error {
 		if name == "" {
 			name = "(unnamed)"
 		}
-		fmt.Fprintf(stdout, "%-20s %-10s %-24s %s\n",
-			identity.DeviceID(d.GetDeviceId()).Fingerprint(), state, name, strings.Join(d.GetAddrs(), " "))
+		fmt.Fprintf(stdout, "%-20s %-10s %-22s %-20s %s\n",
+			identity.DeviceID(d.GetDeviceId()).Fingerprint(), state, accessOf(d), name,
+			strings.Join(d.GetAddrs(), " "))
 	}
 	return nil
 }

@@ -34,11 +34,10 @@ func runClip(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.BoolVar(&o.noDaemon, "no-daemon", false, "dial from this process instead of asking the daemon")
 	fs.BoolVar(&o.stdin, "stdin", false, "read the content from standard input")
 	fs.DurationVar(&o.timeout, "timeout", 30*time.Second, "how long to spend finding the device and pushing")
-	if err := fs.Parse(args[1:]); err != nil {
+	rest, err := parseInterleaved(fs, args[1:])
+	if err != nil {
 		return err
 	}
-
-	rest := fs.Args()
 	if len(rest) == 0 {
 		return fmt.Errorf("usage: openair clip push DEVICE|ADDR [TEXT]")
 	}

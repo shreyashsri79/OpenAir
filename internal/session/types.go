@@ -128,6 +128,29 @@ type Config struct {
 	// M2 replaces the callback with a trust-store lookup, at which point nil
 	// should stop being an accepted value on the listening path.
 	Authorize func(peer identity.Peer) error
+
+	// PeerLookup returns the stored trust-store record for a DeviceID, and is
+	// how the accepting side learns the things Hello cannot tell it: the pinned
+	// privilege key that verifies AuthProof, and the trust level the local user
+	// granted (§6, D-20).
+	//
+	// Authorize decides whether a peer may connect at all; this decides what it
+	// may then do. They are separate because a peer can be perfectly welcome and
+	// still not be Owned.
+	//
+	// Nil means the session enforces no trust ladder of its own and treats every
+	// authorised peer as Trusted. That is correct for a caller that has already
+	// made the whole decision in Authorize -- the pairing listener, a one-shot
+	// CLI receive -- and wrong for a daemon, which has a trust store and should
+	// pass it.
+	PeerLookup func(identity.DeviceID) (identity.Peer, bool)
+
+	// OnAuthEvent, if set, receives every authorisation decision made for an
+	// inbound message. PRD R4 requires the accessed device to keep a local
+	// session log and §6.3 requires authentication events in it; this is the
+	// hook that makes that possible without the session layer owning a log
+	// format. It is called on the control loop, so it must not block.
+	OnAuthEvent func(AuthEvent)
 }
 
 // New wraps an established QUIC connection in a Session: it opens or accepts

@@ -52,6 +52,12 @@ const (
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_CLIPBOARD_REQUEST    DaemonMessageType = 14
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_CLIPBOARD_RESPONSE   DaemonMessageType = 15
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_ERROR                DaemonMessageType = 16
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_UNLOCK_REQUEST       DaemonMessageType = 17
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_UNLOCK_RESPONSE      DaemonMessageType = 18
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_LOCK_REQUEST         DaemonMessageType = 19
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_LOCK_RESPONSE        DaemonMessageType = 20
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_TRUST_REQUEST        DaemonMessageType = 21
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_TRUST_RESPONSE       DaemonMessageType = 22
 )
 
 // Enum value maps for DaemonMessageType.
@@ -74,6 +80,12 @@ var (
 		14: "DAEMON_MESSAGE_TYPE_CLIPBOARD_REQUEST",
 		15: "DAEMON_MESSAGE_TYPE_CLIPBOARD_RESPONSE",
 		16: "DAEMON_MESSAGE_TYPE_ERROR",
+		17: "DAEMON_MESSAGE_TYPE_UNLOCK_REQUEST",
+		18: "DAEMON_MESSAGE_TYPE_UNLOCK_RESPONSE",
+		19: "DAEMON_MESSAGE_TYPE_LOCK_REQUEST",
+		20: "DAEMON_MESSAGE_TYPE_LOCK_RESPONSE",
+		21: "DAEMON_MESSAGE_TYPE_TRUST_REQUEST",
+		22: "DAEMON_MESSAGE_TYPE_TRUST_RESPONSE",
 	}
 	DaemonMessageType_value = map[string]int32{
 		"DAEMON_MESSAGE_TYPE_UNSPECIFIED":          0,
@@ -93,6 +105,12 @@ var (
 		"DAEMON_MESSAGE_TYPE_CLIPBOARD_REQUEST":    14,
 		"DAEMON_MESSAGE_TYPE_CLIPBOARD_RESPONSE":   15,
 		"DAEMON_MESSAGE_TYPE_ERROR":                16,
+		"DAEMON_MESSAGE_TYPE_UNLOCK_REQUEST":       17,
+		"DAEMON_MESSAGE_TYPE_UNLOCK_RESPONSE":      18,
+		"DAEMON_MESSAGE_TYPE_LOCK_REQUEST":         19,
+		"DAEMON_MESSAGE_TYPE_LOCK_RESPONSE":        20,
+		"DAEMON_MESSAGE_TYPE_TRUST_REQUEST":        21,
+		"DAEMON_MESSAGE_TYPE_TRUST_RESPONSE":       22,
 	}
 )
 
@@ -137,6 +155,10 @@ const (
 	DaemonEventKind_DAEMON_EVENT_KIND_PAIRED            DaemonEventKind = 8
 	DaemonEventKind_DAEMON_EVENT_KIND_REFUSED           DaemonEventKind = 9
 	DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD         DaemonEventKind = 10
+	DaemonEventKind_DAEMON_EVENT_KIND_UNLOCKED          DaemonEventKind = 11
+	DaemonEventKind_DAEMON_EVENT_KIND_LOCKED            DaemonEventKind = 12
+	DaemonEventKind_DAEMON_EVENT_KIND_UNLOCK_EXPIRING   DaemonEventKind = 13 // §6.5's 15-minute notice
+	DaemonEventKind_DAEMON_EVENT_KIND_AUTH_REFUSED      DaemonEventKind = 14 // an Owned request was turned away
 )
 
 // Enum value maps for DaemonEventKind.
@@ -153,6 +175,10 @@ var (
 		8:  "DAEMON_EVENT_KIND_PAIRED",
 		9:  "DAEMON_EVENT_KIND_REFUSED",
 		10: "DAEMON_EVENT_KIND_CLIPBOARD",
+		11: "DAEMON_EVENT_KIND_UNLOCKED",
+		12: "DAEMON_EVENT_KIND_LOCKED",
+		13: "DAEMON_EVENT_KIND_UNLOCK_EXPIRING",
+		14: "DAEMON_EVENT_KIND_AUTH_REFUSED",
 	}
 	DaemonEventKind_value = map[string]int32{
 		"DAEMON_EVENT_KIND_UNSPECIFIED":       0,
@@ -166,6 +192,10 @@ var (
 		"DAEMON_EVENT_KIND_PAIRED":            8,
 		"DAEMON_EVENT_KIND_REFUSED":           9,
 		"DAEMON_EVENT_KIND_CLIPBOARD":         10,
+		"DAEMON_EVENT_KIND_UNLOCKED":          11,
+		"DAEMON_EVENT_KIND_LOCKED":            12,
+		"DAEMON_EVENT_KIND_UNLOCK_EXPIRING":   13,
+		"DAEMON_EVENT_KIND_AUTH_REFUSED":      14,
 	}
 )
 
@@ -304,8 +334,17 @@ type DaemonStatusResponse struct {
 	Announcing     bool                   `protobuf:"varint,10,opt,name=announcing,proto3" json:"announcing,omitempty"`                   // advertising on the LAN (M3)
 	AutoAccept     bool                   `protobuf:"varint,11,opt,name=auto_accept,json=autoAccept,proto3" json:"auto_accept,omitempty"` // inbound transfers accepted without a prompt
 	Subscribers    uint32                 `protobuf:"varint,12,opt,name=subscribers,proto3" json:"subscribers,omitempty"`                 // clients currently able to answer a prompt
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// How this device protects its own privilege key (D-21). TIER_NONE means it
+	// holds none and can never initiate Owned-level work.
+	ProtectionTier ProtectionTier `protobuf:"varint,13,opt,name=protection_tier,json=protectionTier,proto3,enum=openair.v1.ProtectionTier" json:"protection_tier,omitempty"`
+	// Devices with a live unlock session right now (D-30's per-peer scope, made
+	// visible: a status that cannot name what is unlocked is not a status).
+	UnlockedDevices []string `protobuf:"bytes,14,rep,name=unlocked_devices,json=unlockedDevices,proto3" json:"unlocked_devices,omitempty"`
+	// The decrypted privilege key is in pages the kernel may swap out, because
+	// locking them was refused. False in the normal case.
+	KeySwappable  bool `protobuf:"varint,15,opt,name=key_swappable,json=keySwappable,proto3" json:"key_swappable,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DaemonStatusResponse) Reset() {
@@ -422,6 +461,27 @@ func (x *DaemonStatusResponse) GetSubscribers() uint32 {
 	return 0
 }
 
+func (x *DaemonStatusResponse) GetProtectionTier() ProtectionTier {
+	if x != nil {
+		return x.ProtectionTier
+	}
+	return ProtectionTier_PROTECTION_TIER_UNSPECIFIED
+}
+
+func (x *DaemonStatusResponse) GetUnlockedDevices() []string {
+	if x != nil {
+		return x.UnlockedDevices
+	}
+	return nil
+}
+
+func (x *DaemonStatusResponse) GetKeySwappable() bool {
+	if x != nil {
+		return x.KeySwappable
+	}
+	return false
+}
+
 // DaemonDeviceListRequest lists what the daemon can see: paired devices from
 // the trust store, and unpaired ones discovery has heard from.
 type DaemonDeviceListRequest struct {
@@ -477,16 +537,26 @@ func (x *DaemonDeviceListRequest) GetPairedOnly() bool {
 }
 
 type DaemonDevice struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Platform      string                 `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
-	Addrs         []string               `protobuf:"bytes,4,rep,name=addrs,proto3" json:"addrs,omitempty"` // discovery candidates; empty if not seen
-	Paired        bool                   `protobuf:"varint,5,opt,name=paired,proto3" json:"paired,omitempty"`
-	Level         TrustLevel             `protobuf:"varint,6,opt,name=level,proto3,enum=openair.v1.TrustLevel" json:"level,omitempty"`
-	SessionOpen   bool                   `protobuf:"varint,7,opt,name=session_open,json=sessionOpen,proto3" json:"session_open,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId    string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DisplayName string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Platform    string                 `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
+	Addrs       []string               `protobuf:"bytes,4,rep,name=addrs,proto3" json:"addrs,omitempty"` // discovery candidates; empty if not seen
+	Paired      bool                   `protobuf:"varint,5,opt,name=paired,proto3" json:"paired,omitempty"`
+	Level       TrustLevel             `protobuf:"varint,6,opt,name=level,proto3,enum=openair.v1.TrustLevel" json:"level,omitempty"`
+	SessionOpen bool                   `protobuf:"varint,7,opt,name=session_open,json=sessionOpen,proto3" json:"session_open,omitempty"`
+	// When this peer's unlock session expires, zero if none is live and -1 under
+	// the "never" policy, which is also D-20's always-on designation.
+	UnlockedUntilUnixMs int64 `protobuf:"varint,8,opt,name=unlocked_until_unix_ms,json=unlockedUntilUnixMs,proto3" json:"unlocked_until_unix_ms,omitempty"`
+	// The tier this peer claimed for its own privilege key (D-21). A peer at
+	// TIER_NONE cannot hold Owned, and the local user should be told why.
+	ProtectionTier ProtectionTier `protobuf:"varint,9,opt,name=protection_tier,json=protectionTier,proto3,enum=openair.v1.ProtectionTier" json:"protection_tier,omitempty"`
+	// Whether a privilege public key is pinned for this peer. Pairings made
+	// before either device had one carry no key, and cannot reach Owned until
+	// they are made again.
+	PrivilegeKeyPinned bool `protobuf:"varint,10,opt,name=privilege_key_pinned,json=privilegeKeyPinned,proto3" json:"privilege_key_pinned,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *DaemonDevice) Reset() {
@@ -564,6 +634,27 @@ func (x *DaemonDevice) GetLevel() TrustLevel {
 func (x *DaemonDevice) GetSessionOpen() bool {
 	if x != nil {
 		return x.SessionOpen
+	}
+	return false
+}
+
+func (x *DaemonDevice) GetUnlockedUntilUnixMs() int64 {
+	if x != nil {
+		return x.UnlockedUntilUnixMs
+	}
+	return 0
+}
+
+func (x *DaemonDevice) GetProtectionTier() ProtectionTier {
+	if x != nil {
+		return x.ProtectionTier
+	}
+	return ProtectionTier_PROTECTION_TIER_UNSPECIFIED
+}
+
+func (x *DaemonDevice) GetPrivilegeKeyPinned() bool {
+	if x != nil {
+		return x.PrivilegeKeyPinned
 	}
 	return false
 }
@@ -1345,6 +1436,384 @@ func (x *DaemonClipboardResponse) GetRequestId() uint64 {
 	return 0
 }
 
+// DaemonUnlockRequest starts an unlock session for one peer (D-18, D-30).
+//
+// The credential travels over the local socket rather than being prompted for
+// by the daemon: the daemon has no terminal, and the socket is already the
+// boundary that protects the identity key it holds (D-58).
+type DaemonUnlockRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`           // the peer this unlock authorises; scope is per peer
+	Passphrase    []byte                 `protobuf:"bytes,3,opt,name=passphrase,proto3" json:"passphrase,omitempty"`                       // tier 2; empty at tier 1
+	KeystoreKek   []byte                 `protobuf:"bytes,4,opt,name=keystore_kek,json=keystoreKek,proto3" json:"keystore_kek,omitempty"`  // tier 1, produced by the shell after a user-presence challenge
+	NeverExpire   bool                   `protobuf:"varint,5,opt,name=never_expire,json=neverExpire,proto3" json:"never_expire,omitempty"` // D-20's always-on designation, not a convenience
+	LifetimeMs    int64                  `protobuf:"varint,6,opt,name=lifetime_ms,json=lifetimeMs,proto3" json:"lifetime_ms,omitempty"`    // zero means the six-hour default
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonUnlockRequest) Reset() {
+	*x = DaemonUnlockRequest{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonUnlockRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonUnlockRequest) ProtoMessage() {}
+
+func (x *DaemonUnlockRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonUnlockRequest.ProtoReflect.Descriptor instead.
+func (*DaemonUnlockRequest) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *DaemonUnlockRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonUnlockRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *DaemonUnlockRequest) GetPassphrase() []byte {
+	if x != nil {
+		return x.Passphrase
+	}
+	return nil
+}
+
+func (x *DaemonUnlockRequest) GetKeystoreKek() []byte {
+	if x != nil {
+		return x.KeystoreKek
+	}
+	return nil
+}
+
+func (x *DaemonUnlockRequest) GetNeverExpire() bool {
+	if x != nil {
+		return x.NeverExpire
+	}
+	return false
+}
+
+func (x *DaemonUnlockRequest) GetLifetimeMs() int64 {
+	if x != nil {
+		return x.LifetimeMs
+	}
+	return 0
+}
+
+type DaemonUnlockResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId      uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExpiresUnixMs  int64                  `protobuf:"varint,2,opt,name=expires_unix_ms,json=expiresUnixMs,proto3" json:"expires_unix_ms,omitempty"` // zero under the "never" policy
+	ProtectionTier ProtectionTier         `protobuf:"varint,3,opt,name=protection_tier,json=protectionTier,proto3,enum=openair.v1.ProtectionTier" json:"protection_tier,omitempty"`
+	KeySwappable   bool                   `protobuf:"varint,4,opt,name=key_swappable,json=keySwappable,proto3" json:"key_swappable,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DaemonUnlockResponse) Reset() {
+	*x = DaemonUnlockResponse{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonUnlockResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonUnlockResponse) ProtoMessage() {}
+
+func (x *DaemonUnlockResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonUnlockResponse.ProtoReflect.Descriptor instead.
+func (*DaemonUnlockResponse) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *DaemonUnlockResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonUnlockResponse) GetExpiresUnixMs() int64 {
+	if x != nil {
+		return x.ExpiresUnixMs
+	}
+	return 0
+}
+
+func (x *DaemonUnlockResponse) GetProtectionTier() ProtectionTier {
+	if x != nil {
+		return x.ProtectionTier
+	}
+	return ProtectionTier_PROTECTION_TIER_UNSPECIFIED
+}
+
+func (x *DaemonUnlockResponse) GetKeySwappable() bool {
+	if x != nil {
+		return x.KeySwappable
+	}
+	return false
+}
+
+// DaemonLockRequest ends an unlock session immediately. An empty device_id
+// ends every session and wipes the decrypted key.
+type DaemonLockRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonLockRequest) Reset() {
+	*x = DaemonLockRequest{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonLockRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonLockRequest) ProtoMessage() {}
+
+func (x *DaemonLockRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonLockRequest.ProtoReflect.Descriptor instead.
+func (*DaemonLockRequest) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *DaemonLockRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonLockRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+type DaemonLockResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonLockResponse) Reset() {
+	*x = DaemonLockResponse{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonLockResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonLockResponse) ProtoMessage() {}
+
+func (x *DaemonLockResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonLockResponse.ProtoReflect.Descriptor instead.
+func (*DaemonLockResponse) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *DaemonLockResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+// DaemonTrustRequest changes what a paired device is allowed to do: promotion
+// to Owned, demotion to Trusted, or the "never expire" auth policy. It is a
+// local act on this device and never a response to a peer's request (§6.4).
+type DaemonTrustRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	Level         TrustLevel             `protobuf:"varint,3,opt,name=level,proto3,enum=openair.v1.TrustLevel" json:"level,omitempty"`
+	AuthPolicy    string                 `protobuf:"bytes,4,opt,name=auth_policy,json=authPolicy,proto3" json:"auth_policy,omitempty"` // "timed" | "never"; empty leaves it unchanged
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonTrustRequest) Reset() {
+	*x = DaemonTrustRequest{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonTrustRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonTrustRequest) ProtoMessage() {}
+
+func (x *DaemonTrustRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonTrustRequest.ProtoReflect.Descriptor instead.
+func (*DaemonTrustRequest) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *DaemonTrustRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonTrustRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *DaemonTrustRequest) GetLevel() TrustLevel {
+	if x != nil {
+		return x.Level
+	}
+	return TrustLevel_TRUST_LEVEL_UNSPECIFIED
+}
+
+func (x *DaemonTrustRequest) GetAuthPolicy() string {
+	if x != nil {
+		return x.AuthPolicy
+	}
+	return ""
+}
+
+type DaemonTrustResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Level         TrustLevel             `protobuf:"varint,2,opt,name=level,proto3,enum=openair.v1.TrustLevel" json:"level,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonTrustResponse) Reset() {
+	*x = DaemonTrustResponse{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonTrustResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonTrustResponse) ProtoMessage() {}
+
+func (x *DaemonTrustResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonTrustResponse.ProtoReflect.Descriptor instead.
+func (*DaemonTrustResponse) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *DaemonTrustResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonTrustResponse) GetLevel() TrustLevel {
+	if x != nil {
+		return x.Level
+	}
+	return TrustLevel_TRUST_LEVEL_UNSPECIFIED
+}
+
 // DaemonError is the failure reply to any request. code is a PROTOCOL.md §10
 // value where one applies and zero where the failure is local.
 type DaemonError struct {
@@ -1358,7 +1827,7 @@ type DaemonError struct {
 
 func (x *DaemonError) Reset() {
 	*x = DaemonError{}
-	mi := &file_openair_v1_daemon_proto_msgTypes[16]
+	mi := &file_openair_v1_daemon_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1370,7 +1839,7 @@ func (x *DaemonError) String() string {
 func (*DaemonError) ProtoMessage() {}
 
 func (x *DaemonError) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_daemon_proto_msgTypes[16]
+	mi := &file_openair_v1_daemon_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1383,7 +1852,7 @@ func (x *DaemonError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonError.ProtoReflect.Descriptor instead.
 func (*DaemonError) Descriptor() ([]byte, []int) {
-	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{16}
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DaemonError) GetRequestId() uint64 {
@@ -1415,7 +1884,7 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"openair.v1\x1a\x1aopenair/v1/clipboard.proto\x1a\x17openair/v1/common.proto\"4\n" +
 	"\x13DaemonStatusRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\x04R\trequestId\"\xa3\x03\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\"\xb8\x04\n" +
 	"\x14DaemonStatusResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
@@ -1434,12 +1903,15 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"announcing\x12\x1f\n" +
 	"\vauto_accept\x18\v \x01(\bR\n" +
 	"autoAccept\x12 \n" +
-	"\vsubscribers\x18\f \x01(\rR\vsubscribers\"Y\n" +
+	"\vsubscribers\x18\f \x01(\rR\vsubscribers\x12C\n" +
+	"\x0fprotection_tier\x18\r \x01(\x0e2\x1a.openair.v1.ProtectionTierR\x0eprotectionTier\x12)\n" +
+	"\x10unlocked_devices\x18\x0e \x03(\tR\x0funlockedDevices\x12#\n" +
+	"\rkey_swappable\x18\x0f \x01(\bR\fkeySwappable\"Y\n" +
 	"\x17DaemonDeviceListRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1f\n" +
 	"\vpaired_only\x18\x02 \x01(\bR\n" +
-	"pairedOnly\"\xe9\x01\n" +
+	"pairedOnly\"\x95\x03\n" +
 	"\fDaemonDevice\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x1a\n" +
@@ -1447,7 +1919,11 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\x05addrs\x18\x04 \x03(\tR\x05addrs\x12\x16\n" +
 	"\x06paired\x18\x05 \x01(\bR\x06paired\x12,\n" +
 	"\x05level\x18\x06 \x01(\x0e2\x16.openair.v1.TrustLevelR\x05level\x12!\n" +
-	"\fsession_open\x18\a \x01(\bR\vsessionOpen\"m\n" +
+	"\fsession_open\x18\a \x01(\bR\vsessionOpen\x123\n" +
+	"\x16unlocked_until_unix_ms\x18\b \x01(\x03R\x13unlockedUntilUnixMs\x12C\n" +
+	"\x0fprotection_tier\x18\t \x01(\x0e2\x1a.openair.v1.ProtectionTierR\x0eprotectionTier\x120\n" +
+	"\x14privilege_key_pinned\x18\n" +
+	" \x01(\bR\x12privilegeKeyPinned\"m\n" +
 	"\x18DaemonDeviceListResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x122\n" +
@@ -1518,12 +1994,47 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\x04push\x18\x03 \x01(\v2\x19.openair.v1.ClipboardPushR\x04push\"8\n" +
 	"\x17DaemonClipboardResponse\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\x04R\trequestId\"Z\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\"\xd8\x01\n" +
+	"\x13DaemonUnlockRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
+	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x1e\n" +
+	"\n" +
+	"passphrase\x18\x03 \x01(\fR\n" +
+	"passphrase\x12!\n" +
+	"\fkeystore_kek\x18\x04 \x01(\fR\vkeystoreKek\x12!\n" +
+	"\fnever_expire\x18\x05 \x01(\bR\vneverExpire\x12\x1f\n" +
+	"\vlifetime_ms\x18\x06 \x01(\x03R\n" +
+	"lifetimeMs\"\xc7\x01\n" +
+	"\x14DaemonUnlockResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12&\n" +
+	"\x0fexpires_unix_ms\x18\x02 \x01(\x03R\rexpiresUnixMs\x12C\n" +
+	"\x0fprotection_tier\x18\x03 \x01(\x0e2\x1a.openair.v1.ProtectionTierR\x0eprotectionTier\x12#\n" +
+	"\rkey_swappable\x18\x04 \x01(\bR\fkeySwappable\"O\n" +
+	"\x11DaemonLockRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
+	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\"3\n" +
+	"\x12DaemonLockResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\"\x9f\x01\n" +
+	"\x12DaemonTrustRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
+	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12,\n" +
+	"\x05level\x18\x03 \x01(\x0e2\x16.openair.v1.TrustLevelR\x05level\x12\x1f\n" +
+	"\vauth_policy\x18\x04 \x01(\tR\n" +
+	"authPolicy\"b\n" +
+	"\x13DaemonTrustResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12,\n" +
+	"\x05level\x18\x02 \x01(\x0e2\x16.openair.v1.TrustLevelR\x05level\"Z\n" +
 	"\vDaemonError\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\rR\x04code\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage*\xb3\x05\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage*\xa0\a\n" +
 	"\x11DaemonMessageType\x12#\n" +
 	"\x1fDAEMON_MESSAGE_TYPE_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"DAEMON_MESSAGE_TYPE_STATUS_REQUEST\x10\x01\x12'\n" +
@@ -1542,7 +2053,13 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"#DAEMON_MESSAGE_TYPE_PROMPT_RESPONSE\x10\r\x12)\n" +
 	"%DAEMON_MESSAGE_TYPE_CLIPBOARD_REQUEST\x10\x0e\x12*\n" +
 	"&DAEMON_MESSAGE_TYPE_CLIPBOARD_RESPONSE\x10\x0f\x12\x1d\n" +
-	"\x19DAEMON_MESSAGE_TYPE_ERROR\x10\x10*\x99\x03\n" +
+	"\x19DAEMON_MESSAGE_TYPE_ERROR\x10\x10\x12&\n" +
+	"\"DAEMON_MESSAGE_TYPE_UNLOCK_REQUEST\x10\x11\x12'\n" +
+	"#DAEMON_MESSAGE_TYPE_UNLOCK_RESPONSE\x10\x12\x12$\n" +
+	" DAEMON_MESSAGE_TYPE_LOCK_REQUEST\x10\x13\x12%\n" +
+	"!DAEMON_MESSAGE_TYPE_LOCK_RESPONSE\x10\x14\x12%\n" +
+	"!DAEMON_MESSAGE_TYPE_TRUST_REQUEST\x10\x15\x12&\n" +
+	"\"DAEMON_MESSAGE_TYPE_TRUST_RESPONSE\x10\x16*\xa2\x04\n" +
 	"\x0fDaemonEventKind\x12!\n" +
 	"\x1dDAEMON_EVENT_KIND_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eDAEMON_EVENT_KIND_DEVICE_FOUND\x10\x01\x12!\n" +
@@ -1555,7 +2072,11 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\x18DAEMON_EVENT_KIND_PAIRED\x10\b\x12\x1d\n" +
 	"\x19DAEMON_EVENT_KIND_REFUSED\x10\t\x12\x1f\n" +
 	"\x1bDAEMON_EVENT_KIND_CLIPBOARD\x10\n" +
-	"*\x7f\n" +
+	"\x12\x1e\n" +
+	"\x1aDAEMON_EVENT_KIND_UNLOCKED\x10\v\x12\x1c\n" +
+	"\x18DAEMON_EVENT_KIND_LOCKED\x10\f\x12%\n" +
+	"!DAEMON_EVENT_KIND_UNLOCK_EXPIRING\x10\r\x12\"\n" +
+	"\x1eDAEMON_EVENT_KIND_AUTH_REFUSED\x10\x0e*\x7f\n" +
 	"\x10DaemonPromptKind\x12\"\n" +
 	"\x1eDAEMON_PROMPT_KIND_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bDAEMON_PROMPT_KIND_PAIR_SAS\x10\x01\x12&\n" +
@@ -1574,7 +2095,7 @@ func file_openair_v1_daemon_proto_rawDescGZIP() []byte {
 }
 
 var file_openair_v1_daemon_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_openair_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_openair_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_openair_v1_daemon_proto_goTypes = []any{
 	(DaemonMessageType)(0),           // 0: openair.v1.DaemonMessageType
 	(DaemonEventKind)(0),             // 1: openair.v1.DaemonEventKind
@@ -1595,21 +2116,33 @@ var file_openair_v1_daemon_proto_goTypes = []any{
 	(*DaemonPromptResponse)(nil),     // 16: openair.v1.DaemonPromptResponse
 	(*DaemonClipboardRequest)(nil),   // 17: openair.v1.DaemonClipboardRequest
 	(*DaemonClipboardResponse)(nil),  // 18: openair.v1.DaemonClipboardResponse
-	(*DaemonError)(nil),              // 19: openair.v1.DaemonError
-	(TrustLevel)(0),                  // 20: openair.v1.TrustLevel
-	(*ClipboardPush)(nil),            // 21: openair.v1.ClipboardPush
+	(*DaemonUnlockRequest)(nil),      // 19: openair.v1.DaemonUnlockRequest
+	(*DaemonUnlockResponse)(nil),     // 20: openair.v1.DaemonUnlockResponse
+	(*DaemonLockRequest)(nil),        // 21: openair.v1.DaemonLockRequest
+	(*DaemonLockResponse)(nil),       // 22: openair.v1.DaemonLockResponse
+	(*DaemonTrustRequest)(nil),       // 23: openair.v1.DaemonTrustRequest
+	(*DaemonTrustResponse)(nil),      // 24: openair.v1.DaemonTrustResponse
+	(*DaemonError)(nil),              // 25: openair.v1.DaemonError
+	(ProtectionTier)(0),              // 26: openair.v1.ProtectionTier
+	(TrustLevel)(0),                  // 27: openair.v1.TrustLevel
+	(*ClipboardPush)(nil),            // 28: openair.v1.ClipboardPush
 }
 var file_openair_v1_daemon_proto_depIdxs = []int32{
-	20, // 0: openair.v1.DaemonDevice.level:type_name -> openair.v1.TrustLevel
-	6,  // 1: openair.v1.DaemonDeviceListResponse.devices:type_name -> openair.v1.DaemonDevice
-	1,  // 2: openair.v1.DaemonEvent.kind:type_name -> openair.v1.DaemonEventKind
-	2,  // 3: openair.v1.DaemonPrompt.kind:type_name -> openair.v1.DaemonPromptKind
-	21, // 4: openair.v1.DaemonClipboardRequest.push:type_name -> openair.v1.ClipboardPush
-	5,  // [5:5] is the sub-list for method output_type
-	5,  // [5:5] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	26, // 0: openair.v1.DaemonStatusResponse.protection_tier:type_name -> openair.v1.ProtectionTier
+	27, // 1: openair.v1.DaemonDevice.level:type_name -> openair.v1.TrustLevel
+	26, // 2: openair.v1.DaemonDevice.protection_tier:type_name -> openair.v1.ProtectionTier
+	6,  // 3: openair.v1.DaemonDeviceListResponse.devices:type_name -> openair.v1.DaemonDevice
+	1,  // 4: openair.v1.DaemonEvent.kind:type_name -> openair.v1.DaemonEventKind
+	2,  // 5: openair.v1.DaemonPrompt.kind:type_name -> openair.v1.DaemonPromptKind
+	28, // 6: openair.v1.DaemonClipboardRequest.push:type_name -> openair.v1.ClipboardPush
+	26, // 7: openair.v1.DaemonUnlockResponse.protection_tier:type_name -> openair.v1.ProtectionTier
+	27, // 8: openair.v1.DaemonTrustRequest.level:type_name -> openair.v1.TrustLevel
+	27, // 9: openair.v1.DaemonTrustResponse.level:type_name -> openair.v1.TrustLevel
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_openair_v1_daemon_proto_init() }
@@ -1625,7 +2158,7 @@ func file_openair_v1_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_openair_v1_daemon_proto_rawDesc), len(file_openair_v1_daemon_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   17,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 
 	"github.com/shreyashsri79/openair/internal/daemon"
+	"github.com/shreyashsri79/openair/internal/identity"
 )
 
 func main() {
@@ -45,6 +46,15 @@ func main() {
 
 	if !quiet {
 		cfg.Logf = func(format string, args ...any) { log.Printf(format, args...) }
+	}
+
+	// Before anything can unseal a privilege key: D-19 requires that the
+	// decrypted key never reaches a core file, and on Linux this also stops a
+	// same-uid debugger attaching to a process that will hold one for six
+	// hours. A failure is worth saying out loud and is not fatal -- the daemon
+	// still serves, and the tighter guarantee simply is not available.
+	if err := identity.DisableCoreDumps(); err != nil && !quiet {
+		log.Printf("could not disable core dumps: %v", err)
 	}
 
 	d, err := daemon.New(cfg)

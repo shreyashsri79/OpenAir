@@ -58,18 +58,40 @@ const (
 	MsgClipboardRequest   = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_CLIPBOARD_REQUEST)
 	MsgClipboardResponse  = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_CLIPBOARD_RESPONSE)
 	MsgError              = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_ERROR)
+	MsgUnlockRequest      = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_UNLOCK_REQUEST)
+	MsgUnlockResponse     = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_UNLOCK_RESPONSE)
+	MsgLockRequest        = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_LOCK_REQUEST)
+	MsgLockResponse       = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_LOCK_RESPONSE)
+	MsgTrustRequest       = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_TRUST_REQUEST)
+	MsgTrustResponse      = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_TRUST_RESPONSE)
 )
 
 // isReply reports whether a message type answers an earlier request of ours.
 // Everything else is delivered to the connection's handler.
+// isReply says which message types answer a request rather than start one.
+//
+// Every response type must be listed. A missing one is not a compile error and
+// not a runtime error either: the reply is routed as though it were an inbound
+// request, no handler claims it, and the caller waits until its context expires.
+// TestEveryResponseTypeIsAReply is what stops that from being discovered by a
+// twenty-second timeout.
 func isReply(t uint16) bool {
 	switch t {
 	case MsgStatusResponse, MsgDeviceListResponse, MsgSendResponse,
-		MsgPairResponse, MsgSubscribeResponse, MsgClipboardResponse, MsgError:
+		MsgPairResponse, MsgSubscribeResponse, MsgClipboardResponse,
+		MsgUnlockResponse, MsgLockResponse, MsgTrustResponse, MsgError:
 		return true
 	}
 	return false
 }
+
+// correlated reports whether a message type is an answer to something, and so
+// is routed by request ID rather than to a handler.
+//
+// Two tables, one rule: replies answer our requests, and a prompt response
+// answers a prompt we sent. The direction is unambiguous from the type, which
+// is why one connection can carry both without a wrapper (D-51).
+func correlated(t uint16) bool { return isReply(t) || t == MsgPromptResponse }
 
 // Error is a DaemonError received in place of the reply that was expected.
 type Error struct {

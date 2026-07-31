@@ -75,7 +75,7 @@ func runPairing(t *testing.T, offerer, scanner *side) (offRes, scanRes pairResul
 	t.Helper()
 
 	ln, err := conn.Listen("127.0.0.1:0", offerer.id, "offerer", "linux",
-		offerer.handlers(), offerer.handler.Authorize)
+		offerer.handlers(), conn.ListenOptions{Authorize: offerer.handler.Authorize})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
