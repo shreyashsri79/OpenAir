@@ -342,9 +342,17 @@ type DaemonStatusResponse struct {
 	UnlockedDevices []string `protobuf:"bytes,14,rep,name=unlocked_devices,json=unlockedDevices,proto3" json:"unlocked_devices,omitempty"`
 	// The decrypted privilege key is in pages the kernel may swap out, because
 	// locking them was refused. False in the normal case.
-	KeySwappable  bool `protobuf:"varint,15,opt,name=key_swappable,json=keySwappable,proto3" json:"key_swappable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	KeySwappable bool `protobuf:"varint,15,opt,name=key_swappable,json=keySwappable,proto3" json:"key_swappable,omitempty"`
+	// Rendezvous (M7, §16). Empty address means none is configured, which is a
+	// device reachable on its LAN and by explicit address only.
+	RendezvousAddr string `protobuf:"bytes,16,opt,name=rendezvous_addr,json=rendezvousAddr,proto3" json:"rendezvous_addr,omitempty"`
+	// When this device's registration expires, or zero if it has never
+	// succeeded. A status that said "configured" without saying "and working"
+	// would be the least useful true statement available.
+	RendezvousExpiresUnixMs int64  `protobuf:"varint,17,opt,name=rendezvous_expires_unix_ms,json=rendezvousExpiresUnixMs,proto3" json:"rendezvous_expires_unix_ms,omitempty"`
+	RendezvousError         string `protobuf:"bytes,18,opt,name=rendezvous_error,json=rendezvousError,proto3" json:"rendezvous_error,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *DaemonStatusResponse) Reset() {
@@ -480,6 +488,27 @@ func (x *DaemonStatusResponse) GetKeySwappable() bool {
 		return x.KeySwappable
 	}
 	return false
+}
+
+func (x *DaemonStatusResponse) GetRendezvousAddr() string {
+	if x != nil {
+		return x.RendezvousAddr
+	}
+	return ""
+}
+
+func (x *DaemonStatusResponse) GetRendezvousExpiresUnixMs() int64 {
+	if x != nil {
+		return x.RendezvousExpiresUnixMs
+	}
+	return 0
+}
+
+func (x *DaemonStatusResponse) GetRendezvousError() string {
+	if x != nil {
+		return x.RendezvousError
+	}
+	return ""
 }
 
 // DaemonDeviceListRequest lists what the daemon can see: paired devices from
@@ -1884,7 +1913,7 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"openair.v1\x1a\x1aopenair/v1/clipboard.proto\x1a\x17openair/v1/common.proto\"4\n" +
 	"\x13DaemonStatusRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\x04R\trequestId\"\xb8\x04\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\"\xc9\x05\n" +
 	"\x14DaemonStatusResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
@@ -1906,7 +1935,10 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\vsubscribers\x18\f \x01(\rR\vsubscribers\x12C\n" +
 	"\x0fprotection_tier\x18\r \x01(\x0e2\x1a.openair.v1.ProtectionTierR\x0eprotectionTier\x12)\n" +
 	"\x10unlocked_devices\x18\x0e \x03(\tR\x0funlockedDevices\x12#\n" +
-	"\rkey_swappable\x18\x0f \x01(\bR\fkeySwappable\"Y\n" +
+	"\rkey_swappable\x18\x0f \x01(\bR\fkeySwappable\x12'\n" +
+	"\x0frendezvous_addr\x18\x10 \x01(\tR\x0erendezvousAddr\x12;\n" +
+	"\x1arendezvous_expires_unix_ms\x18\x11 \x01(\x03R\x17rendezvousExpiresUnixMs\x12)\n" +
+	"\x10rendezvous_error\x18\x12 \x01(\tR\x0frendezvousError\"Y\n" +
 	"\x17DaemonDeviceListRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1f\n" +

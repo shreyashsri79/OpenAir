@@ -129,41 +129,55 @@ func (d *Daemon) targetAddrs(ctx context.Context, target string) ([]string, erro
 	if discovery.IsAddr(target) {
 		return []string{target}, nil
 	}
-	if d.disco == nil {
-		return nil, fmt.Errorf("%q is not a host:port and discovery is not running", target)
-	}
 
-	deadline := time.Now().Add(resolveWait)
-	for {
-		matches := discovery.Match(d.disco.Peers(), target)
-		switch {
-		case len(matches) == 1:
-			return matches[0].Addrs, nil
-		case len(matches) > 1:
-			var b strings.Builder
-			for _, m := range matches {
-				fmt.Fprintf(&b, "\n  %s  %s", m.DeviceID.Fingerprint(), m.DisplayName)
+	// The local network first: it is faster, it needs no third party, and it is
+	// the case that covers most transfers.
+	if d.disco != nil {
+		deadline := time.Now().Add(resolveWait)
+		for {
+			matches := discovery.Match(d.disco.Peers(), target)
+			switch {
+			case len(matches) == 1:
+				return matches[0].Addrs, nil
+			case len(matches) > 1:
+				var b strings.Builder
+				for _, m := range matches {
+					fmt.Fprintf(&b, "\n  %s  %s", m.DeviceID.Fingerprint(), m.DisplayName)
+				}
+				return nil, fmt.Errorf("%q matches %d devices, name one exactly:%s", target, len(matches), b.String())
 			}
-			return nil, fmt.Errorf("%q matches %d devices, name one exactly:%s", target, len(matches), b.String())
-		}
-
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("%w: no device matching %q is on the local network; "+
-				"give an explicit host:port, or check both devices are on the same network", errNoSuchDevice, target)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+			if time.Now().After(deadline) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
 		}
 	}
+
+	// Not on this network. A paired device may have published where it is
+	// (M7, §16), which is the entire reason to run a rendezvous server: the
+	// answer is verified against the key already pinned for that device, so
+	// what arrives is an address to try rather than an authority to trust.
+	if id, paired := d.resolvePaired(target); paired {
+		if addrs, err := d.lookupPeer(ctx, id); err == nil && len(addrs) > 0 {
+			d.cfg.Logf("found %s through the rendezvous server: %s",
+				id.Fingerprint(), strings.Join(addrs, " "))
+			return addrs, nil
+		} else if err != nil && d.rendezvousClient() != nil {
+			d.cfg.Logf("rendezvous lookup for %s: %v", id.Fingerprint(), err)
+		}
+	}
+
+	if d.disco == nil && d.rendezvousClient() == nil {
+		return nil, fmt.Errorf("%q is not a host:port, and neither discovery nor a rendezvous server is running", target)
+	}
+	return nil, fmt.Errorf("%w: no device matching %q is on the local network or published to the rendezvous server; "+
+		"give an explicit host:port, or check the other device is running", errNoSuchDevice, target)
 }
 
-// dialFirst tries each address in turn.
-//
-// A key mismatch stops the loop rather than moving on: the device answering is
-// not the one pinned, and its other advertised addresses belong to the same
-// impostor (PROTOCOL.md §2).
 func (d *Daemon) dialFirst(ctx context.Context, addrs []string) (session.Session, error) {
 	if len(addrs) == 0 {
 		return nil, errors.New("no address to dial")

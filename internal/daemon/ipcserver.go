@@ -150,7 +150,23 @@ func (d *Daemon) onStatus(c *client, payload []byte) {
 			sort.Strings(out)
 			return out
 		}(),
-		KeySwappable: d.id.Swappable(),
+		KeySwappable:   d.id.Swappable(),
+		RendezvousAddr: d.cfg.Rendezvous.Addr,
+		RendezvousExpiresUnixMs: func() int64 {
+			if c := d.rendezvousClient(); c != nil {
+				at, _ := c.LastRegistration()
+				return millisOrZero(at)
+			}
+			return 0
+		}(),
+		RendezvousError: func() string {
+			if c := d.rendezvousClient(); c != nil {
+				if _, err := c.LastRegistration(); err != nil {
+					return err.Error()
+				}
+			}
+			return ""
+		}(),
 	})
 }
 

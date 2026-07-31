@@ -180,6 +180,20 @@ func runStatus(args []string, stdout io.Writer) error {
 		st.GetProtectionTier() != openairv1.ProtectionTier_PROTECTION_TIER_NONE {
 		fmt.Fprintf(stdout, "unlocked    nothing -- run `openair unlock DEVICE` to act unattended\n")
 	}
+	// Rendezvous, M7. "Configured" is not the interesting fact; "registered
+	// and for how much longer" is, because a device whose registration is
+	// failing is a device its peers cannot find.
+	if addr := st.GetRendezvousAddr(); addr != "" {
+		switch {
+		case st.GetRendezvousError() != "":
+			fmt.Fprintf(stdout, "rendezvous  %s -- not registered: %s\n", addr, st.GetRendezvousError())
+		case st.GetRendezvousExpiresUnixMs() > 0:
+			until := time.Until(time.UnixMilli(st.GetRendezvousExpiresUnixMs())).Round(time.Second)
+			fmt.Fprintf(stdout, "rendezvous  %s -- registered, expires in %s\n", addr, until)
+		default:
+			fmt.Fprintf(stdout, "rendezvous  %s -- registering\n", addr)
+		}
+	}
 	if st.GetKeySwappable() {
 		fmt.Fprintf(stdout, "warning     the privilege key could not be locked into RAM; it may reach swap\n")
 	}

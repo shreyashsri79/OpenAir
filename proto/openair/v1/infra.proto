@@ -8,6 +8,38 @@ option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;o
 // to servers rather than to peers, so they are not capability messages and
 // carry no capID.
 
+// InfraMessageType enumerates the messages carried on a rendezvous or relay
+// control connection. PROTOCOL.md gives these messages no msgType because they
+// are not capability messages and ride no envelope; this enum is that
+// enumeration, and the framing is specified in §16 (D-62).
+enum InfraMessageType {
+  INFRA_MESSAGE_TYPE_UNSPECIFIED = 0;
+  INFRA_MESSAGE_TYPE_REGISTER = 1;
+  INFRA_MESSAGE_TYPE_REGISTER_ACK = 2;
+  INFRA_MESSAGE_TYPE_LOOKUP_REQUEST = 3;
+  INFRA_MESSAGE_TYPE_LOOKUP_RESPONSE = 4;
+  INFRA_MESSAGE_TYPE_RELAY_HELLO = 5;
+  INFRA_MESSAGE_TYPE_RELAY_CHALLENGE = 6;
+  INFRA_MESSAGE_TYPE_RELAY_AUTH = 7;
+  INFRA_MESSAGE_TYPE_RELAY_AUTH_OK = 8;
+  INFRA_MESSAGE_TYPE_ERROR = 9;
+}
+
+// RegistrationAck answers a Register. expires_at is the server's own view of
+// when the entry lapses, which may be earlier than the client asked for: §16
+// caps it at ten minutes and the client heartbeats against this value rather
+// than against what it requested.
+message RegistrationAck {
+  int64 expires_at = 1;
+}
+
+// InfraError is the failure reply on a rendezvous or relay control connection.
+// It carries no PROTOCOL.md §10 code: those describe a session, and these
+// messages are spoken to a server that holds none.
+message InfraError {
+  string message = 1;
+}
+
 // Registration maps a DeviceID to its current endpoints (PRD R7). The server
 // must verify the signature before storing, so only the key holder can move a
 // device's endpoints, and must reject expiries more than 10 minutes out.

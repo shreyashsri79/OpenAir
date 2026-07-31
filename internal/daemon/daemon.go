@@ -31,6 +31,7 @@ import (
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/ipc"
 	"github.com/shreyashsri79/openair/internal/pairing"
+	"github.com/shreyashsri79/openair/internal/rendezvous"
 	"github.com/shreyashsri79/openair/internal/session"
 	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
 )
@@ -82,6 +83,10 @@ type Config struct {
 	// PromptTimeout overrides how long a transfer prompt waits for an answer.
 	PromptTimeout time.Duration
 
+	// Rendezvous is where to publish this device's endpoints and where to look
+	// peers up when they are not on this network (M7, §16). Empty disables it.
+	Rendezvous RendezvousConfig
+
 	Logf func(format string, args ...any)
 
 	// Discovery carries the test-only knobs that keep two daemons inside one
@@ -111,6 +116,10 @@ type Daemon struct {
 	ipcLn   net.Listener
 	disco   *discovery.Discovery
 	started time.Time
+
+	// rendezvous is nil unless one is configured. Held under mu because Run
+	// installs it after New has returned.
+	rendezvous *rendezvous.Client
 
 	mu       sync.Mutex
 	sessions map[identity.DeviceID]session.Session
@@ -294,6 +303,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if !clipboard.HaveOS() {
 		d.cfg.Logf("no system clipboard here; inbound pushes will be reported, not pasted")
 	}
+
+	d.startRendezvous(ctx)
 
 	var wg sync.WaitGroup
 	wg.Add(3)

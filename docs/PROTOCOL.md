@@ -915,6 +915,26 @@ so only the key holder can move a device's endpoints. It MUST reject
 registrations whose `expires_at` is more than 10 minutes out, forcing heartbeats
 and keeping stale entries short-lived.
 
+Each variable-length field in the signed input is preceded by its length as a
+u32 (the endpoint count, then each endpoint, then `relay_home`). Without the
+lengths the concatenation is ambiguous — `["a","bc"]` and `["ab","c"]` sign
+identically — and one signature would cover several different endpoint lists
+(D-63).
+
+**Transport and framing.** A rendezvous connection is TLS 1.3 in which *both*
+ends present the certificate keyed by their identity key (§2). Control messages
+are framed `msgType u16 || length u32 || payload`, little-endian, capped at
+64 KiB; `msgType` values are the `InfraMessageType` enum. This is not the §3
+envelope, which carries a capID and a negotiated version that mean nothing on a
+connection to a server.
+
+The registering key is the client certificate's. A DeviceID is a hash, so a
+server cannot recover a key from one, and `Registration` carries none: the
+server derives the DeviceID from the certificate and MUST reject a registration
+whose `device_id` is not that device (D-62). Clients pin the server by the
+DeviceID its key derives, exactly as peers pin each other; an address alone is
+not an identity.
+
 **What a rendezvous operator learns**, stated plainly for the threat model
 (PRD R29): which DeviceIDs exist, their IP endpoints, when they are online, and
 who looks up whom — a social graph of the user's own devices. It learns no

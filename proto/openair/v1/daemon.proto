@@ -74,6 +74,15 @@ message DaemonStatusResponse {
   // The decrypted privilege key is in pages the kernel may swap out, because
   // locking them was refused. False in the normal case.
   bool key_swappable = 15;
+
+  // Rendezvous (M7, §16). Empty address means none is configured, which is a
+  // device reachable on its LAN and by explicit address only.
+  string rendezvous_addr = 16;
+  // When this device's registration expires, or zero if it has never
+  // succeeded. A status that said "configured" without saying "and working"
+  // would be the least useful true statement available.
+  int64 rendezvous_expires_unix_ms = 17;
+  string rendezvous_error = 18;
 }
 
 // DaemonDeviceListRequest lists what the daemon can see: paired devices from

@@ -21,6 +21,175 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// InfraMessageType enumerates the messages carried on a rendezvous or relay
+// control connection. PROTOCOL.md gives these messages no msgType because they
+// are not capability messages and ride no envelope; this enum is that
+// enumeration, and the framing is specified in §16 (D-62).
+type InfraMessageType int32
+
+const (
+	InfraMessageType_INFRA_MESSAGE_TYPE_UNSPECIFIED     InfraMessageType = 0
+	InfraMessageType_INFRA_MESSAGE_TYPE_REGISTER        InfraMessageType = 1
+	InfraMessageType_INFRA_MESSAGE_TYPE_REGISTER_ACK    InfraMessageType = 2
+	InfraMessageType_INFRA_MESSAGE_TYPE_LOOKUP_REQUEST  InfraMessageType = 3
+	InfraMessageType_INFRA_MESSAGE_TYPE_LOOKUP_RESPONSE InfraMessageType = 4
+	InfraMessageType_INFRA_MESSAGE_TYPE_RELAY_HELLO     InfraMessageType = 5
+	InfraMessageType_INFRA_MESSAGE_TYPE_RELAY_CHALLENGE InfraMessageType = 6
+	InfraMessageType_INFRA_MESSAGE_TYPE_RELAY_AUTH      InfraMessageType = 7
+	InfraMessageType_INFRA_MESSAGE_TYPE_RELAY_AUTH_OK   InfraMessageType = 8
+	InfraMessageType_INFRA_MESSAGE_TYPE_ERROR           InfraMessageType = 9
+)
+
+// Enum value maps for InfraMessageType.
+var (
+	InfraMessageType_name = map[int32]string{
+		0: "INFRA_MESSAGE_TYPE_UNSPECIFIED",
+		1: "INFRA_MESSAGE_TYPE_REGISTER",
+		2: "INFRA_MESSAGE_TYPE_REGISTER_ACK",
+		3: "INFRA_MESSAGE_TYPE_LOOKUP_REQUEST",
+		4: "INFRA_MESSAGE_TYPE_LOOKUP_RESPONSE",
+		5: "INFRA_MESSAGE_TYPE_RELAY_HELLO",
+		6: "INFRA_MESSAGE_TYPE_RELAY_CHALLENGE",
+		7: "INFRA_MESSAGE_TYPE_RELAY_AUTH",
+		8: "INFRA_MESSAGE_TYPE_RELAY_AUTH_OK",
+		9: "INFRA_MESSAGE_TYPE_ERROR",
+	}
+	InfraMessageType_value = map[string]int32{
+		"INFRA_MESSAGE_TYPE_UNSPECIFIED":     0,
+		"INFRA_MESSAGE_TYPE_REGISTER":        1,
+		"INFRA_MESSAGE_TYPE_REGISTER_ACK":    2,
+		"INFRA_MESSAGE_TYPE_LOOKUP_REQUEST":  3,
+		"INFRA_MESSAGE_TYPE_LOOKUP_RESPONSE": 4,
+		"INFRA_MESSAGE_TYPE_RELAY_HELLO":     5,
+		"INFRA_MESSAGE_TYPE_RELAY_CHALLENGE": 6,
+		"INFRA_MESSAGE_TYPE_RELAY_AUTH":      7,
+		"INFRA_MESSAGE_TYPE_RELAY_AUTH_OK":   8,
+		"INFRA_MESSAGE_TYPE_ERROR":           9,
+	}
+)
+
+func (x InfraMessageType) Enum() *InfraMessageType {
+	p := new(InfraMessageType)
+	*p = x
+	return p
+}
+
+func (x InfraMessageType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (InfraMessageType) Descriptor() protoreflect.EnumDescriptor {
+	return file_openair_v1_infra_proto_enumTypes[0].Descriptor()
+}
+
+func (InfraMessageType) Type() protoreflect.EnumType {
+	return &file_openair_v1_infra_proto_enumTypes[0]
+}
+
+func (x InfraMessageType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use InfraMessageType.Descriptor instead.
+func (InfraMessageType) EnumDescriptor() ([]byte, []int) {
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{0}
+}
+
+// RegistrationAck answers a Register. expires_at is the server's own view of
+// when the entry lapses, which may be earlier than the client asked for: §16
+// caps it at ten minutes and the client heartbeats against this value rather
+// than against what it requested.
+type RegistrationAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ExpiresAt     int64                  `protobuf:"varint,1,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegistrationAck) Reset() {
+	*x = RegistrationAck{}
+	mi := &file_openair_v1_infra_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegistrationAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegistrationAck) ProtoMessage() {}
+
+func (x *RegistrationAck) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_infra_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegistrationAck.ProtoReflect.Descriptor instead.
+func (*RegistrationAck) Descriptor() ([]byte, []int) {
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *RegistrationAck) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+// InfraError is the failure reply on a rendezvous or relay control connection.
+// It carries no PROTOCOL.md §10 code: those describe a session, and these
+// messages are spoken to a server that holds none.
+type InfraError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InfraError) Reset() {
+	*x = InfraError{}
+	mi := &file_openair_v1_infra_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InfraError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InfraError) ProtoMessage() {}
+
+func (x *InfraError) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_infra_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InfraError.ProtoReflect.Descriptor instead.
+func (*InfraError) Descriptor() ([]byte, []int) {
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *InfraError) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 // Registration maps a DeviceID to its current endpoints (PRD R7). The server
 // must verify the signature before storing, so only the key holder can move a
 // device's endpoints, and must reject expiries more than 10 minutes out.
@@ -43,7 +212,7 @@ type Registration struct {
 
 func (x *Registration) Reset() {
 	*x = Registration{}
-	mi := &file_openair_v1_infra_proto_msgTypes[0]
+	mi := &file_openair_v1_infra_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -55,7 +224,7 @@ func (x *Registration) String() string {
 func (*Registration) ProtoMessage() {}
 
 func (x *Registration) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_infra_proto_msgTypes[0]
+	mi := &file_openair_v1_infra_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -68,7 +237,7 @@ func (x *Registration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Registration.ProtoReflect.Descriptor instead.
 func (*Registration) Descriptor() ([]byte, []int) {
-	return file_openair_v1_infra_proto_rawDescGZIP(), []int{0}
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Registration) GetDeviceId() string {
@@ -122,7 +291,7 @@ type LookupRequest struct {
 
 func (x *LookupRequest) Reset() {
 	*x = LookupRequest{}
-	mi := &file_openair_v1_infra_proto_msgTypes[1]
+	mi := &file_openair_v1_infra_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -134,7 +303,7 @@ func (x *LookupRequest) String() string {
 func (*LookupRequest) ProtoMessage() {}
 
 func (x *LookupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_infra_proto_msgTypes[1]
+	mi := &file_openair_v1_infra_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -147,7 +316,7 @@ func (x *LookupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LookupRequest.ProtoReflect.Descriptor instead.
 func (*LookupRequest) Descriptor() ([]byte, []int) {
-	return file_openair_v1_infra_proto_rawDescGZIP(), []int{1}
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *LookupRequest) GetDeviceId() string {
@@ -167,7 +336,7 @@ type LookupResponse struct {
 
 func (x *LookupResponse) Reset() {
 	*x = LookupResponse{}
-	mi := &file_openair_v1_infra_proto_msgTypes[2]
+	mi := &file_openair_v1_infra_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -179,7 +348,7 @@ func (x *LookupResponse) String() string {
 func (*LookupResponse) ProtoMessage() {}
 
 func (x *LookupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_infra_proto_msgTypes[2]
+	mi := &file_openair_v1_infra_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -192,7 +361,7 @@ func (x *LookupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LookupResponse.ProtoReflect.Descriptor instead.
 func (*LookupResponse) Descriptor() ([]byte, []int) {
-	return file_openair_v1_infra_proto_rawDescGZIP(), []int{2}
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *LookupResponse) GetRegistration() *Registration {
@@ -221,7 +390,7 @@ type RelayHello struct {
 
 func (x *RelayHello) Reset() {
 	*x = RelayHello{}
-	mi := &file_openair_v1_infra_proto_msgTypes[3]
+	mi := &file_openair_v1_infra_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -233,7 +402,7 @@ func (x *RelayHello) String() string {
 func (*RelayHello) ProtoMessage() {}
 
 func (x *RelayHello) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_infra_proto_msgTypes[3]
+	mi := &file_openair_v1_infra_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -246,7 +415,7 @@ func (x *RelayHello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RelayHello.ProtoReflect.Descriptor instead.
 func (*RelayHello) Descriptor() ([]byte, []int) {
-	return file_openair_v1_infra_proto_rawDescGZIP(), []int{3}
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RelayHello) GetDeviceId() string {
@@ -272,7 +441,7 @@ type RelayChallenge struct {
 
 func (x *RelayChallenge) Reset() {
 	*x = RelayChallenge{}
-	mi := &file_openair_v1_infra_proto_msgTypes[4]
+	mi := &file_openair_v1_infra_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -284,7 +453,7 @@ func (x *RelayChallenge) String() string {
 func (*RelayChallenge) ProtoMessage() {}
 
 func (x *RelayChallenge) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_infra_proto_msgTypes[4]
+	mi := &file_openair_v1_infra_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -297,7 +466,7 @@ func (x *RelayChallenge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RelayChallenge.ProtoReflect.Descriptor instead.
 func (*RelayChallenge) Descriptor() ([]byte, []int) {
-	return file_openair_v1_infra_proto_rawDescGZIP(), []int{4}
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RelayChallenge) GetServerNonce() []byte {
@@ -316,7 +485,7 @@ type RelayAuth struct {
 
 func (x *RelayAuth) Reset() {
 	*x = RelayAuth{}
-	mi := &file_openair_v1_infra_proto_msgTypes[5]
+	mi := &file_openair_v1_infra_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +497,7 @@ func (x *RelayAuth) String() string {
 func (*RelayAuth) ProtoMessage() {}
 
 func (x *RelayAuth) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_infra_proto_msgTypes[5]
+	mi := &file_openair_v1_infra_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +510,7 @@ func (x *RelayAuth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RelayAuth.ProtoReflect.Descriptor instead.
 func (*RelayAuth) Descriptor() ([]byte, []int) {
-	return file_openair_v1_infra_proto_rawDescGZIP(), []int{5}
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RelayAuth) GetSignature() []byte {
@@ -367,7 +536,7 @@ type PunchRequest struct {
 
 func (x *PunchRequest) Reset() {
 	*x = PunchRequest{}
-	mi := &file_openair_v1_infra_proto_msgTypes[6]
+	mi := &file_openair_v1_infra_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -379,7 +548,7 @@ func (x *PunchRequest) String() string {
 func (*PunchRequest) ProtoMessage() {}
 
 func (x *PunchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_infra_proto_msgTypes[6]
+	mi := &file_openair_v1_infra_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -392,7 +561,7 @@ func (x *PunchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PunchRequest.ProtoReflect.Descriptor instead.
 func (*PunchRequest) Descriptor() ([]byte, []int) {
-	return file_openair_v1_infra_proto_rawDescGZIP(), []int{6}
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *PunchRequest) GetTargetDeviceId() string {
@@ -433,7 +602,7 @@ type PunchReady struct {
 
 func (x *PunchReady) Reset() {
 	*x = PunchReady{}
-	mi := &file_openair_v1_infra_proto_msgTypes[7]
+	mi := &file_openair_v1_infra_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -445,7 +614,7 @@ func (x *PunchReady) String() string {
 func (*PunchReady) ProtoMessage() {}
 
 func (x *PunchReady) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_infra_proto_msgTypes[7]
+	mi := &file_openair_v1_infra_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -458,7 +627,7 @@ func (x *PunchReady) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PunchReady.ProtoReflect.Descriptor instead.
 func (*PunchReady) Descriptor() ([]byte, []int) {
-	return file_openair_v1_infra_proto_rawDescGZIP(), []int{7}
+	return file_openair_v1_infra_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PunchReady) GetCandidates() []string {
@@ -480,7 +649,13 @@ var File_openair_v1_infra_proto protoreflect.FileDescriptor
 const file_openair_v1_infra_proto_rawDesc = "" +
 	"\n" +
 	"\x16openair/v1/infra.proto\x12\n" +
-	"openair.v1\"\xc2\x01\n" +
+	"openair.v1\"0\n" +
+	"\x0fRegistrationAck\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x01 \x01(\x03R\texpiresAt\"&\n" +
+	"\n" +
+	"InfraError\x12\x18\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\xc2\x01\n" +
 	"\fRegistration\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1c\n" +
 	"\tendpoints\x18\x02 \x03(\tR\tendpoints\x12\x1d\n" +
@@ -517,7 +692,18 @@ const file_openair_v1_infra_proto_rawDesc = "" +
 	"candidates\x18\x01 \x03(\tR\n" +
 	"candidates\x12\x1f\n" +
 	"\vpunch_token\x18\x02 \x01(\fR\n" +
-	"punchTokenBEZCgithub.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1b\x06proto3"
+	"punchToken*\xfe\x02\n" +
+	"\x10InfraMessageType\x12\"\n" +
+	"\x1eINFRA_MESSAGE_TYPE_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bINFRA_MESSAGE_TYPE_REGISTER\x10\x01\x12#\n" +
+	"\x1fINFRA_MESSAGE_TYPE_REGISTER_ACK\x10\x02\x12%\n" +
+	"!INFRA_MESSAGE_TYPE_LOOKUP_REQUEST\x10\x03\x12&\n" +
+	"\"INFRA_MESSAGE_TYPE_LOOKUP_RESPONSE\x10\x04\x12\"\n" +
+	"\x1eINFRA_MESSAGE_TYPE_RELAY_HELLO\x10\x05\x12&\n" +
+	"\"INFRA_MESSAGE_TYPE_RELAY_CHALLENGE\x10\x06\x12!\n" +
+	"\x1dINFRA_MESSAGE_TYPE_RELAY_AUTH\x10\a\x12$\n" +
+	" INFRA_MESSAGE_TYPE_RELAY_AUTH_OK\x10\b\x12\x1c\n" +
+	"\x18INFRA_MESSAGE_TYPE_ERROR\x10\tBEZCgithub.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1b\x06proto3"
 
 var (
 	file_openair_v1_infra_proto_rawDescOnce sync.Once
@@ -531,19 +717,23 @@ func file_openair_v1_infra_proto_rawDescGZIP() []byte {
 	return file_openair_v1_infra_proto_rawDescData
 }
 
-var file_openair_v1_infra_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_openair_v1_infra_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_openair_v1_infra_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_openair_v1_infra_proto_goTypes = []any{
-	(*Registration)(nil),   // 0: openair.v1.Registration
-	(*LookupRequest)(nil),  // 1: openair.v1.LookupRequest
-	(*LookupResponse)(nil), // 2: openair.v1.LookupResponse
-	(*RelayHello)(nil),     // 3: openair.v1.RelayHello
-	(*RelayChallenge)(nil), // 4: openair.v1.RelayChallenge
-	(*RelayAuth)(nil),      // 5: openair.v1.RelayAuth
-	(*PunchRequest)(nil),   // 6: openair.v1.PunchRequest
-	(*PunchReady)(nil),     // 7: openair.v1.PunchReady
+	(InfraMessageType)(0),   // 0: openair.v1.InfraMessageType
+	(*RegistrationAck)(nil), // 1: openair.v1.RegistrationAck
+	(*InfraError)(nil),      // 2: openair.v1.InfraError
+	(*Registration)(nil),    // 3: openair.v1.Registration
+	(*LookupRequest)(nil),   // 4: openair.v1.LookupRequest
+	(*LookupResponse)(nil),  // 5: openair.v1.LookupResponse
+	(*RelayHello)(nil),      // 6: openair.v1.RelayHello
+	(*RelayChallenge)(nil),  // 7: openair.v1.RelayChallenge
+	(*RelayAuth)(nil),       // 8: openair.v1.RelayAuth
+	(*PunchRequest)(nil),    // 9: openair.v1.PunchRequest
+	(*PunchReady)(nil),      // 10: openair.v1.PunchReady
 }
 var file_openair_v1_infra_proto_depIdxs = []int32{
-	0, // 0: openair.v1.LookupResponse.registration:type_name -> openair.v1.Registration
+	3, // 0: openair.v1.LookupResponse.registration:type_name -> openair.v1.Registration
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -561,13 +751,14 @@ func file_openair_v1_infra_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_openair_v1_infra_proto_rawDesc), len(file_openair_v1_infra_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   8,
+			NumEnums:      1,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_openair_v1_infra_proto_goTypes,
 		DependencyIndexes: file_openair_v1_infra_proto_depIdxs,
+		EnumInfos:         file_openair_v1_infra_proto_enumTypes,
 		MessageInfos:      file_openair_v1_infra_proto_msgTypes,
 	}.Build()
 	File_openair_v1_infra_proto = out.File

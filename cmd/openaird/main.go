@@ -42,7 +42,15 @@ func main() {
 		"accept every inbound transfer from a paired device without asking")
 	flag.BoolVar(&cfg.NoAnnounce, "no-announce", false, "do not advertise this device on the local network")
 	flag.BoolVar(&quiet, "quiet", false, "log nothing but errors")
+	rendezvousAddr := flag.String("rendezvous", "",
+		"rendezvous server as host:port@deviceid, so paired devices can find this one across networks")
 	flag.Parse()
+
+	rv, err := daemon.ParseRendezvous(*rendezvousAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg.Rendezvous = rv
 
 	if !quiet {
 		cfg.Logf = func(format string, args ...any) { log.Printf(format, args...) }
