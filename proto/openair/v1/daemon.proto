@@ -3,6 +3,7 @@ syntax = "proto3";
 package openair.v1;
 
 import "openair/v1/clipboard.proto";
+import "openair/v1/notifications.proto";
 import "openair/v1/remotefs.proto";
 import "openair/v1/common.proto";
 
@@ -47,6 +48,10 @@ enum DaemonMessageType {
   DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE = 24;
   DAEMON_MESSAGE_TYPE_FETCH_REQUEST = 25;
   DAEMON_MESSAGE_TYPE_FETCH_RESPONSE = 26;
+  DAEMON_MESSAGE_TYPE_NOTIFY_REQUEST = 27;
+  DAEMON_MESSAGE_TYPE_NOTIFY_RESPONSE = 28;
+  DAEMON_MESSAGE_TYPE_DISMISS_REQUEST = 29;
+  DAEMON_MESSAGE_TYPE_DISMISS_RESPONSE = 30;
 }
 
 // DaemonStatusRequest asks what the daemon is and what it is doing.
@@ -190,6 +195,8 @@ enum DaemonEventKind {
   DAEMON_EVENT_KIND_LOCKED = 12;
   DAEMON_EVENT_KIND_UNLOCK_EXPIRING = 13;  // §6.5's 15-minute notice
   DAEMON_EVENT_KIND_AUTH_REFUSED = 14;     // an Owned request was turned away
+  DAEMON_EVENT_KIND_NOTIFICATION = 15;         // a peer mirrored a notification (M12, §12)
+  DAEMON_EVENT_KIND_NOTIFICATION_REMOVED = 16; // that notification is gone
 }
 
 // DaemonEvent is unsolicited: request_id is the request it belongs to when one
@@ -203,6 +210,10 @@ message DaemonEvent {
   uint64 bytes_done = 6;
   uint64 bytes_total = 7;
   bool ok = 8;
+
+  // The mirrored notification, on NOTIFICATION events (M12). A shell needs the
+  // app, the icon and the actions, none of which fit in `text`.
+  Posted notification = 9;
 }
 
 enum DaemonPromptKind {
@@ -337,4 +348,35 @@ message DaemonFetchResponse {
   uint64 bytes_written = 2;
   string dest = 3;
   string error = 4;
+}
+
+// DaemonNotifyRequest mirrors a notification to a device (M12, §12). The
+// source-side filter runs in the daemon, before anything is marshalled.
+message DaemonNotifyRequest {
+  uint64 request_id = 1;
+  string device = 2;         // empty means every device with a session open
+  Posted notification = 3;
+}
+
+message DaemonNotifyResponse {
+  uint64 request_id = 1;
+  uint32 delivered = 2;  // how many devices it reached
+  bool filtered = 3;     // this device's own policy withheld it
+  string error = 4;
+}
+
+// DaemonDismissRequest clears a notification: on a sink it tells the source,
+// on a source it tells the other sinks (§12's dismiss-on-one-dismisses-
+// everywhere).
+message DaemonDismissRequest {
+  uint64 request_id = 1;
+  string device = 2;
+  string key = 3;
+  string action_id = 4;  // set to press a button instead of dismissing
+  string text = 5;       // inline reply text, with action_id
+}
+
+message DaemonDismissResponse {
+  uint64 request_id = 1;
+  string error = 2;
 }

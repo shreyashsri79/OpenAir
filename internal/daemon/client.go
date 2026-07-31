@@ -220,3 +220,50 @@ func (c *Client) Fetch(ctx context.Context, device, path, dest string, offset, l
 	}
 	return resp.GetBytesWritten(), nil
 }
+
+// Notify mirrors a notification to a device, or to every connected device when
+// device is empty (M12, §12).
+//
+// The source-side filter runs in the daemon, so a notification this device's
+// policy excludes never reaches the wire — `filtered` reports that, and it is
+// not an error (PRD R22).
+func (c *Client) Notify(ctx context.Context, device string, n *openairv1.Posted) (delivered int, filtered bool, err error) {
+	var resp openairv1.DaemonNotifyResponse
+	req := &openairv1.DaemonNotifyRequest{Device: device, Notification: n}
+	if err := c.peer.Do(ctx, ipc.MsgNotifyRequest, req, &resp); err != nil {
+		return 0, false, err
+	}
+	if resp.GetError() != "" {
+		return int(resp.GetDelivered()), resp.GetFiltered(), errors.New(resp.GetError())
+	}
+	return int(resp.GetDelivered()), resp.GetFiltered(), nil
+}
+
+// Dismiss clears a notification. With a device, it tells that device — which on
+// a sink means telling the source. With no device, it clears one this machine
+// posted, telling every sink that has it (§12).
+func (c *Client) Dismiss(ctx context.Context, device, key string) error {
+	var resp openairv1.DaemonDismissResponse
+	req := &openairv1.DaemonDismissRequest{Device: device, Key: key}
+	if err := c.peer.Do(ctx, ipc.MsgDismissRequest, req, &resp); err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		return errors.New(resp.GetError())
+	}
+	return nil
+}
+
+// InvokeAction presses a button on a mirrored notification, with text for an
+// inline reply (§12, PRD R22).
+func (c *Client) InvokeAction(ctx context.Context, device, key, actionID, text string) error {
+	var resp openairv1.DaemonDismissResponse
+	req := &openairv1.DaemonDismissRequest{Device: device, Key: key, ActionId: actionID, Text: text}
+	if err := c.peer.Do(ctx, ipc.MsgDismissRequest, req, &resp); err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		return errors.New(resp.GetError())
+	}
+	return nil
+}

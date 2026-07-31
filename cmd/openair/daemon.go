@@ -105,6 +105,20 @@ func formatEvent(ev *openairv1.DaemonEvent) string {
 		return fmt.Sprintf("refused: %s", ev.GetText())
 	case openairv1.DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD:
 		return fmt.Sprintf("clipboard from %s: %s", id, ev.GetText())
+	case openairv1.DaemonEventKind_DAEMON_EVENT_KIND_NOTIFICATION:
+		n := ev.GetNotification()
+		if n == nil {
+			return fmt.Sprintf("notification from %s: %s", id, ev.GetText())
+		}
+		line := fmt.Sprintf("[%s] %s", n.GetAppName(), n.GetTitle())
+		if body := n.GetBody(); body != "" {
+			line += " -- " + body
+		}
+		// The key is printed because it is what `openair dismiss` takes, and a
+		// notification a person cannot clear from here is half a feature.
+		return fmt.Sprintf("%s from %s  (%s)", line, id, n.GetKey())
+	case openairv1.DaemonEventKind_DAEMON_EVENT_KIND_NOTIFICATION_REMOVED:
+		return fmt.Sprintf("notification cleared: %s", ev.GetText())
 	default:
 		return ""
 	}

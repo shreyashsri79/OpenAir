@@ -26,6 +26,7 @@ import (
 
 	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
+	"github.com/shreyashsri79/openair/internal/caps/notifications"
 	"github.com/shreyashsri79/openair/internal/caps/remotefs"
 	"github.com/shreyashsri79/openair/internal/conn"
 	"github.com/shreyashsri79/openair/internal/discovery"
@@ -93,6 +94,22 @@ type Config struct {
 	// (M8, §17). Empty disables it.
 	Relay RelayConfig
 
+	// AutoClipboard turns on M13's clipboard watcher: content copied here is
+	// pushed to every connected device, and content arriving from one is
+	// applied here. Opt-in, because a device that mirrors every copy mirrors
+	// what a password manager put on the clipboard too (PRD R19).
+	AutoClipboard bool
+
+	// ClipboardInterval overrides the watcher's poll period. Zero means
+	// clipboard.DefaultPollInterval.
+	ClipboardInterval time.Duration
+
+	// NotifyAllow, when non-empty, is the only set of app IDs whose
+	// notifications leave this device (PRD R22). NotifyBlock is the weaker
+	// form: everything except these. Allow wins when both are set.
+	NotifyAllow []string
+	NotifyBlock []string
+
 	// Shares are the directories this device offers for browsing (M10, §11).
 	// Empty shares nothing, which is what a daemon started without --share
 	// does: remotefs is registered either way, and answers every request with
@@ -124,19 +141,24 @@ type DiscoveryOptions struct {
 
 // Daemon is one running instance.
 type Daemon struct {
-	cfg      Config
-	keyDir   string
-	id       *identity.FileIdentity
-	store    *identity.FileTrustStore
-	pairs    *pairing.Handler
-	files    *files.Capability
-	clip     *clipboard.Capability
-	rfs      *remotefs.Capability
-	endpoint *conn.Endpoint
-	ln       conn.Listener
-	ipcLn    net.Listener
-	disco    *discovery.Discovery
-	started  time.Time
+	cfg    Config
+	keyDir string
+	id     *identity.FileIdentity
+	store  *identity.FileTrustStore
+	pairs  *pairing.Handler
+	files  *files.Capability
+	clip   *clipboard.Capability
+	rfs    *remotefs.Capability
+	notes  *notifications.Capability
+
+	// clipState is M13's loop suppression, shared between the watcher and the
+	// receive path so that content applied from a peer is never sent back.
+	clipState *clipboard.SyncState
+	endpoint  *conn.Endpoint
+	ln        conn.Listener
+	ipcLn     net.Listener
+	disco     *discovery.Discovery
+	started   time.Time
 
 	// paths is the one UDP socket this device uses for everything: listening,
 	// dialling, STUN and punch probes (M9). Sharing it is not tidiness -- a
@@ -259,6 +281,15 @@ func New(cfg Config) (*Daemon, error) {
 		Logf:       cfg.Logf,
 	})
 
+	d.notes = notifications.New(notifications.Config{
+		Allow:     notifyFilter(cfg.NotifyAllow, cfg.NotifyBlock),
+		OnPosted:  d.onNotificationPosted,
+		OnRemoved: d.onNotificationRemoved,
+		OnDismiss: d.onNotificationDismissed,
+		OnAction:  d.onNotificationAction,
+	})
+	d.clipState = clipboard.NewSyncState()
+
 	d.clip = clipboard.New(clipboard.Config{
 		Tag:       string(id.DeviceID()),
 		OnReceive: d.onClipboardReceived,
@@ -367,6 +398,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	d.startRelay(ctx)
 	d.startRendezvous(ctx)
+	d.startAutoClipboard(ctx)
 
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -427,10 +459,11 @@ func (d *Daemon) Close() error {
 // honoured while a transfer is still running (§6.1).
 func (d *Daemon) handlers() map[byte]session.Handler {
 	return map[byte]session.Handler{
-		0:               &controlHandler{d: d},
-		files.CapID:     d.files,
-		clipboard.CapID: d.clip,
-		remotefs.CapID:  d.rfs,
+		0:                   &controlHandler{d: d},
+		files.CapID:         d.files,
+		clipboard.CapID:     d.clip,
+		remotefs.CapID:      d.rfs,
+		notifications.CapID: d.notes,
 	}
 }
 
@@ -606,4 +639,20 @@ func portOf(addr string) (int, error) {
 		return 0, fmt.Errorf("listener port %q: %w", port, err)
 	}
 	return n, nil
+}
+
+// notifyFilter builds the source-side notification policy (PRD R22, D-76).
+//
+// An allowlist wins over a blocklist when both are given, because the two
+// disagree only where a user has said both "only these" and "not that", and
+// the stricter reading is the one they meant.
+func notifyFilter(allow, block []string) func(string) bool {
+	switch {
+	case len(allow) > 0:
+		return notifications.AllowList(allow...)
+	case len(block) > 0:
+		return notifications.BlockList(block...)
+	default:
+		return nil
+	}
 }

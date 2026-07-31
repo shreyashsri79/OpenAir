@@ -603,6 +603,14 @@ clipboard reads (PRD R19). Content MUST NOT be persisted by relays or logged in
 plaintext (PRD R20). Receivers SHOULD cap accepted content and reject oversized
 pushes rather than buffering them.
 
+**Automatic sync adds no messages.** It is this push, sent by a watcher rather
+than by a person, which is why the wire format needs nothing for it. The two
+fields that exist for it are load-bearing: `origin_tag` suppresses a device's
+own push coming back, and `origin_ts` settles a simultaneous edit — two devices
+that copy something at the same instant would otherwise swap clipboards and
+keep re-sending. Last writer wins, and content older than the receiver's own
+last local copy is ignored (D-77).
+
 ---
 
 ## 10. Error codes
@@ -762,6 +770,17 @@ filtered content had already left the device.
 
 `Dismiss` flowing back gives dismiss-on-one-dismisses-everywhere. Sinks MUST
 tolerate a `Removed` for a key they never saw.
+
+The "everywhere" half is the source's work and needs state §12 does not
+mention: a source has to remember which sinks it told about each key, or a
+dismiss arriving from one of them has nowhere to go. Ours keeps that map per
+key and forgets it when the notification is cleared.
+
+Notifications run on the **identity** key, not the privilege key — the same
+argument as the clipboard (D-20): mirroring that stopped whenever an unlock
+lapsed would be experienced as the feature being broken rather than the policy
+being enforced. What protects the content is the source-side filter, and the
+fact that a peer had to be paired at all (D-75).
 
 Desktop-to-desktop forwarding uses the same messages in the same direction —
 there is nothing phone-specific in the format (PRD R23).

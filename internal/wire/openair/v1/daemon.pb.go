@@ -62,6 +62,10 @@ const (
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE      DaemonMessageType = 24
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_FETCH_REQUEST        DaemonMessageType = 25
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_FETCH_RESPONSE       DaemonMessageType = 26
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_NOTIFY_REQUEST       DaemonMessageType = 27
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_NOTIFY_RESPONSE      DaemonMessageType = 28
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_DISMISS_REQUEST      DaemonMessageType = 29
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_DISMISS_RESPONSE     DaemonMessageType = 30
 )
 
 // Enum value maps for DaemonMessageType.
@@ -94,6 +98,10 @@ var (
 		24: "DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE",
 		25: "DAEMON_MESSAGE_TYPE_FETCH_REQUEST",
 		26: "DAEMON_MESSAGE_TYPE_FETCH_RESPONSE",
+		27: "DAEMON_MESSAGE_TYPE_NOTIFY_REQUEST",
+		28: "DAEMON_MESSAGE_TYPE_NOTIFY_RESPONSE",
+		29: "DAEMON_MESSAGE_TYPE_DISMISS_REQUEST",
+		30: "DAEMON_MESSAGE_TYPE_DISMISS_RESPONSE",
 	}
 	DaemonMessageType_value = map[string]int32{
 		"DAEMON_MESSAGE_TYPE_UNSPECIFIED":          0,
@@ -123,6 +131,10 @@ var (
 		"DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE":      24,
 		"DAEMON_MESSAGE_TYPE_FETCH_REQUEST":        25,
 		"DAEMON_MESSAGE_TYPE_FETCH_RESPONSE":       26,
+		"DAEMON_MESSAGE_TYPE_NOTIFY_REQUEST":       27,
+		"DAEMON_MESSAGE_TYPE_NOTIFY_RESPONSE":      28,
+		"DAEMON_MESSAGE_TYPE_DISMISS_REQUEST":      29,
+		"DAEMON_MESSAGE_TYPE_DISMISS_RESPONSE":     30,
 	}
 )
 
@@ -156,21 +168,23 @@ func (DaemonMessageType) EnumDescriptor() ([]byte, []int) {
 type DaemonEventKind int32
 
 const (
-	DaemonEventKind_DAEMON_EVENT_KIND_UNSPECIFIED       DaemonEventKind = 0
-	DaemonEventKind_DAEMON_EVENT_KIND_DEVICE_FOUND      DaemonEventKind = 1
-	DaemonEventKind_DAEMON_EVENT_KIND_DEVICE_LOST       DaemonEventKind = 2
-	DaemonEventKind_DAEMON_EVENT_KIND_SESSION_OPEN      DaemonEventKind = 3
-	DaemonEventKind_DAEMON_EVENT_KIND_SESSION_CLOSED    DaemonEventKind = 4
-	DaemonEventKind_DAEMON_EVENT_KIND_TRANSFER_STARTED  DaemonEventKind = 5
-	DaemonEventKind_DAEMON_EVENT_KIND_TRANSFER_PROGRESS DaemonEventKind = 6
-	DaemonEventKind_DAEMON_EVENT_KIND_TRANSFER_DONE     DaemonEventKind = 7
-	DaemonEventKind_DAEMON_EVENT_KIND_PAIRED            DaemonEventKind = 8
-	DaemonEventKind_DAEMON_EVENT_KIND_REFUSED           DaemonEventKind = 9
-	DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD         DaemonEventKind = 10
-	DaemonEventKind_DAEMON_EVENT_KIND_UNLOCKED          DaemonEventKind = 11
-	DaemonEventKind_DAEMON_EVENT_KIND_LOCKED            DaemonEventKind = 12
-	DaemonEventKind_DAEMON_EVENT_KIND_UNLOCK_EXPIRING   DaemonEventKind = 13 // §6.5's 15-minute notice
-	DaemonEventKind_DAEMON_EVENT_KIND_AUTH_REFUSED      DaemonEventKind = 14 // an Owned request was turned away
+	DaemonEventKind_DAEMON_EVENT_KIND_UNSPECIFIED          DaemonEventKind = 0
+	DaemonEventKind_DAEMON_EVENT_KIND_DEVICE_FOUND         DaemonEventKind = 1
+	DaemonEventKind_DAEMON_EVENT_KIND_DEVICE_LOST          DaemonEventKind = 2
+	DaemonEventKind_DAEMON_EVENT_KIND_SESSION_OPEN         DaemonEventKind = 3
+	DaemonEventKind_DAEMON_EVENT_KIND_SESSION_CLOSED       DaemonEventKind = 4
+	DaemonEventKind_DAEMON_EVENT_KIND_TRANSFER_STARTED     DaemonEventKind = 5
+	DaemonEventKind_DAEMON_EVENT_KIND_TRANSFER_PROGRESS    DaemonEventKind = 6
+	DaemonEventKind_DAEMON_EVENT_KIND_TRANSFER_DONE        DaemonEventKind = 7
+	DaemonEventKind_DAEMON_EVENT_KIND_PAIRED               DaemonEventKind = 8
+	DaemonEventKind_DAEMON_EVENT_KIND_REFUSED              DaemonEventKind = 9
+	DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD            DaemonEventKind = 10
+	DaemonEventKind_DAEMON_EVENT_KIND_UNLOCKED             DaemonEventKind = 11
+	DaemonEventKind_DAEMON_EVENT_KIND_LOCKED               DaemonEventKind = 12
+	DaemonEventKind_DAEMON_EVENT_KIND_UNLOCK_EXPIRING      DaemonEventKind = 13 // §6.5's 15-minute notice
+	DaemonEventKind_DAEMON_EVENT_KIND_AUTH_REFUSED         DaemonEventKind = 14 // an Owned request was turned away
+	DaemonEventKind_DAEMON_EVENT_KIND_NOTIFICATION         DaemonEventKind = 15 // a peer mirrored a notification (M12, §12)
+	DaemonEventKind_DAEMON_EVENT_KIND_NOTIFICATION_REMOVED DaemonEventKind = 16 // that notification is gone
 )
 
 // Enum value maps for DaemonEventKind.
@@ -191,23 +205,27 @@ var (
 		12: "DAEMON_EVENT_KIND_LOCKED",
 		13: "DAEMON_EVENT_KIND_UNLOCK_EXPIRING",
 		14: "DAEMON_EVENT_KIND_AUTH_REFUSED",
+		15: "DAEMON_EVENT_KIND_NOTIFICATION",
+		16: "DAEMON_EVENT_KIND_NOTIFICATION_REMOVED",
 	}
 	DaemonEventKind_value = map[string]int32{
-		"DAEMON_EVENT_KIND_UNSPECIFIED":       0,
-		"DAEMON_EVENT_KIND_DEVICE_FOUND":      1,
-		"DAEMON_EVENT_KIND_DEVICE_LOST":       2,
-		"DAEMON_EVENT_KIND_SESSION_OPEN":      3,
-		"DAEMON_EVENT_KIND_SESSION_CLOSED":    4,
-		"DAEMON_EVENT_KIND_TRANSFER_STARTED":  5,
-		"DAEMON_EVENT_KIND_TRANSFER_PROGRESS": 6,
-		"DAEMON_EVENT_KIND_TRANSFER_DONE":     7,
-		"DAEMON_EVENT_KIND_PAIRED":            8,
-		"DAEMON_EVENT_KIND_REFUSED":           9,
-		"DAEMON_EVENT_KIND_CLIPBOARD":         10,
-		"DAEMON_EVENT_KIND_UNLOCKED":          11,
-		"DAEMON_EVENT_KIND_LOCKED":            12,
-		"DAEMON_EVENT_KIND_UNLOCK_EXPIRING":   13,
-		"DAEMON_EVENT_KIND_AUTH_REFUSED":      14,
+		"DAEMON_EVENT_KIND_UNSPECIFIED":          0,
+		"DAEMON_EVENT_KIND_DEVICE_FOUND":         1,
+		"DAEMON_EVENT_KIND_DEVICE_LOST":          2,
+		"DAEMON_EVENT_KIND_SESSION_OPEN":         3,
+		"DAEMON_EVENT_KIND_SESSION_CLOSED":       4,
+		"DAEMON_EVENT_KIND_TRANSFER_STARTED":     5,
+		"DAEMON_EVENT_KIND_TRANSFER_PROGRESS":    6,
+		"DAEMON_EVENT_KIND_TRANSFER_DONE":        7,
+		"DAEMON_EVENT_KIND_PAIRED":               8,
+		"DAEMON_EVENT_KIND_REFUSED":              9,
+		"DAEMON_EVENT_KIND_CLIPBOARD":            10,
+		"DAEMON_EVENT_KIND_UNLOCKED":             11,
+		"DAEMON_EVENT_KIND_LOCKED":               12,
+		"DAEMON_EVENT_KIND_UNLOCK_EXPIRING":      13,
+		"DAEMON_EVENT_KIND_AUTH_REFUSED":         14,
+		"DAEMON_EVENT_KIND_NOTIFICATION":         15,
+		"DAEMON_EVENT_KIND_NOTIFICATION_REMOVED": 16,
 	}
 )
 
@@ -1127,15 +1145,18 @@ func (x *DaemonSubscribeResponse) GetRequestId() uint64 {
 // DaemonEvent is unsolicited: request_id is the request it belongs to when one
 // asked for it, and zero otherwise.
 type DaemonEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Kind          DaemonEventKind        `protobuf:"varint,2,opt,name=kind,proto3,enum=openair.v1.DaemonEventKind" json:"kind,omitempty"`
-	Text          string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
-	DeviceId      string                 `protobuf:"bytes,4,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	TransferId    string                 `protobuf:"bytes,5,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"`
-	BytesDone     uint64                 `protobuf:"varint,6,opt,name=bytes_done,json=bytesDone,proto3" json:"bytes_done,omitempty"`
-	BytesTotal    uint64                 `protobuf:"varint,7,opt,name=bytes_total,json=bytesTotal,proto3" json:"bytes_total,omitempty"`
-	Ok            bool                   `protobuf:"varint,8,opt,name=ok,proto3" json:"ok,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	RequestId  uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Kind       DaemonEventKind        `protobuf:"varint,2,opt,name=kind,proto3,enum=openair.v1.DaemonEventKind" json:"kind,omitempty"`
+	Text       string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
+	DeviceId   string                 `protobuf:"bytes,4,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	TransferId string                 `protobuf:"bytes,5,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"`
+	BytesDone  uint64                 `protobuf:"varint,6,opt,name=bytes_done,json=bytesDone,proto3" json:"bytes_done,omitempty"`
+	BytesTotal uint64                 `protobuf:"varint,7,opt,name=bytes_total,json=bytesTotal,proto3" json:"bytes_total,omitempty"`
+	Ok         bool                   `protobuf:"varint,8,opt,name=ok,proto3" json:"ok,omitempty"`
+	// The mirrored notification, on NOTIFICATION events (M12). A shell needs the
+	// app, the icon and the actions, none of which fit in `text`.
+	Notification  *Posted `protobuf:"bytes,9,opt,name=notification,proto3" json:"notification,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1224,6 +1245,13 @@ func (x *DaemonEvent) GetOk() bool {
 		return x.Ok
 	}
 	return false
+}
+
+func (x *DaemonEvent) GetNotification() *Posted {
+	if x != nil {
+		return x.Notification
+	}
+	return nil
 }
 
 // DaemonPrompt travels daemon -> client and requires an answer. request_id is
@@ -2241,12 +2269,273 @@ func (x *DaemonFetchResponse) GetError() string {
 	return ""
 }
 
+// DaemonNotifyRequest mirrors a notification to a device (M12, §12). The
+// source-side filter runs in the daemon, before anything is marshalled.
+type DaemonNotifyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"` // empty means every device with a session open
+	Notification  *Posted                `protobuf:"bytes,3,opt,name=notification,proto3" json:"notification,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonNotifyRequest) Reset() {
+	*x = DaemonNotifyRequest{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonNotifyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonNotifyRequest) ProtoMessage() {}
+
+func (x *DaemonNotifyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonNotifyRequest.ProtoReflect.Descriptor instead.
+func (*DaemonNotifyRequest) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *DaemonNotifyRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonNotifyRequest) GetDevice() string {
+	if x != nil {
+		return x.Device
+	}
+	return ""
+}
+
+func (x *DaemonNotifyRequest) GetNotification() *Posted {
+	if x != nil {
+		return x.Notification
+	}
+	return nil
+}
+
+type DaemonNotifyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Delivered     uint32                 `protobuf:"varint,2,opt,name=delivered,proto3" json:"delivered,omitempty"` // how many devices it reached
+	Filtered      bool                   `protobuf:"varint,3,opt,name=filtered,proto3" json:"filtered,omitempty"`   // this device's own policy withheld it
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonNotifyResponse) Reset() {
+	*x = DaemonNotifyResponse{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonNotifyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonNotifyResponse) ProtoMessage() {}
+
+func (x *DaemonNotifyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonNotifyResponse.ProtoReflect.Descriptor instead.
+func (*DaemonNotifyResponse) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *DaemonNotifyResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonNotifyResponse) GetDelivered() uint32 {
+	if x != nil {
+		return x.Delivered
+	}
+	return 0
+}
+
+func (x *DaemonNotifyResponse) GetFiltered() bool {
+	if x != nil {
+		return x.Filtered
+	}
+	return false
+}
+
+func (x *DaemonNotifyResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// DaemonDismissRequest clears a notification: on a sink it tells the source,
+// on a source it tells the other sinks (§12's dismiss-on-one-dismisses-
+// everywhere).
+type DaemonDismissRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
+	Key           string                 `protobuf:"bytes,3,opt,name=key,proto3" json:"key,omitempty"`
+	ActionId      string                 `protobuf:"bytes,4,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"` // set to press a button instead of dismissing
+	Text          string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`                         // inline reply text, with action_id
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonDismissRequest) Reset() {
+	*x = DaemonDismissRequest{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonDismissRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonDismissRequest) ProtoMessage() {}
+
+func (x *DaemonDismissRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonDismissRequest.ProtoReflect.Descriptor instead.
+func (*DaemonDismissRequest) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *DaemonDismissRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonDismissRequest) GetDevice() string {
+	if x != nil {
+		return x.Device
+	}
+	return ""
+}
+
+func (x *DaemonDismissRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *DaemonDismissRequest) GetActionId() string {
+	if x != nil {
+		return x.ActionId
+	}
+	return ""
+}
+
+func (x *DaemonDismissRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type DaemonDismissResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonDismissResponse) Reset() {
+	*x = DaemonDismissResponse{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonDismissResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonDismissResponse) ProtoMessage() {}
+
+func (x *DaemonDismissResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonDismissResponse.ProtoReflect.Descriptor instead.
+func (*DaemonDismissResponse) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *DaemonDismissResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonDismissResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_openair_v1_daemon_proto protoreflect.FileDescriptor
 
 const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\n" +
 	"\x17openair/v1/daemon.proto\x12\n" +
-	"openair.v1\x1a\x1aopenair/v1/clipboard.proto\x1a\x19openair/v1/remotefs.proto\x1a\x17openair/v1/common.proto\"4\n" +
+	"openair.v1\x1a\x1aopenair/v1/clipboard.proto\x1a\x1eopenair/v1/notifications.proto\x1a\x19openair/v1/remotefs.proto\x1a\x17openair/v1/common.proto\"4\n" +
 	"\x13DaemonStatusRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\"\x91\x06\n" +
@@ -2328,7 +2617,7 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\aprompts\x18\x02 \x01(\bR\aprompts\"8\n" +
 	"\x17DaemonSubscribeResponse\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\x04R\trequestId\"\xff\x01\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\"\xb7\x02\n" +
 	"\vDaemonEvent\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12/\n" +
@@ -2341,7 +2630,8 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"bytes_done\x18\x06 \x01(\x04R\tbytesDone\x12\x1f\n" +
 	"\vbytes_total\x18\a \x01(\x04R\n" +
 	"bytesTotal\x12\x0e\n" +
-	"\x02ok\x18\b \x01(\bR\x02ok\"\x98\x02\n" +
+	"\x02ok\x18\b \x01(\bR\x02ok\x126\n" +
+	"\fnotification\x18\t \x01(\v2\x12.openair.v1.PostedR\fnotification\"\x98\x02\n" +
 	"\fDaemonPrompt\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x120\n" +
@@ -2432,7 +2722,29 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12#\n" +
 	"\rbytes_written\x18\x02 \x01(\x04R\fbytesWritten\x12\x12\n" +
 	"\x04dest\x18\x03 \x01(\tR\x04dest\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error*\xc0\b\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x84\x01\n" +
+	"\x13DaemonNotifyRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x16\n" +
+	"\x06device\x18\x02 \x01(\tR\x06device\x126\n" +
+	"\fnotification\x18\x03 \x01(\v2\x12.openair.v1.PostedR\fnotification\"\x85\x01\n" +
+	"\x14DaemonNotifyResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1c\n" +
+	"\tdelivered\x18\x02 \x01(\rR\tdelivered\x12\x1a\n" +
+	"\bfiltered\x18\x03 \x01(\bR\bfiltered\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x90\x01\n" +
+	"\x14DaemonDismissRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x16\n" +
+	"\x06device\x18\x02 \x01(\tR\x06device\x12\x10\n" +
+	"\x03key\x18\x03 \x01(\tR\x03key\x12\x1b\n" +
+	"\taction_id\x18\x04 \x01(\tR\bactionId\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\"L\n" +
+	"\x15DaemonDismissResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error*\xe4\t\n" +
 	"\x11DaemonMessageType\x12#\n" +
 	"\x1fDAEMON_MESSAGE_TYPE_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"DAEMON_MESSAGE_TYPE_STATUS_REQUEST\x10\x01\x12'\n" +
@@ -2461,7 +2773,11 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\"DAEMON_MESSAGE_TYPE_BROWSE_REQUEST\x10\x17\x12'\n" +
 	"#DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE\x10\x18\x12%\n" +
 	"!DAEMON_MESSAGE_TYPE_FETCH_REQUEST\x10\x19\x12&\n" +
-	"\"DAEMON_MESSAGE_TYPE_FETCH_RESPONSE\x10\x1a*\xa2\x04\n" +
+	"\"DAEMON_MESSAGE_TYPE_FETCH_RESPONSE\x10\x1a\x12&\n" +
+	"\"DAEMON_MESSAGE_TYPE_NOTIFY_REQUEST\x10\x1b\x12'\n" +
+	"#DAEMON_MESSAGE_TYPE_NOTIFY_RESPONSE\x10\x1c\x12'\n" +
+	"#DAEMON_MESSAGE_TYPE_DISMISS_REQUEST\x10\x1d\x12(\n" +
+	"$DAEMON_MESSAGE_TYPE_DISMISS_RESPONSE\x10\x1e*\xf2\x04\n" +
 	"\x0fDaemonEventKind\x12!\n" +
 	"\x1dDAEMON_EVENT_KIND_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eDAEMON_EVENT_KIND_DEVICE_FOUND\x10\x01\x12!\n" +
@@ -2478,7 +2794,9 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\x1aDAEMON_EVENT_KIND_UNLOCKED\x10\v\x12\x1c\n" +
 	"\x18DAEMON_EVENT_KIND_LOCKED\x10\f\x12%\n" +
 	"!DAEMON_EVENT_KIND_UNLOCK_EXPIRING\x10\r\x12\"\n" +
-	"\x1eDAEMON_EVENT_KIND_AUTH_REFUSED\x10\x0e*\x7f\n" +
+	"\x1eDAEMON_EVENT_KIND_AUTH_REFUSED\x10\x0e\x12\"\n" +
+	"\x1eDAEMON_EVENT_KIND_NOTIFICATION\x10\x0f\x12*\n" +
+	"&DAEMON_EVENT_KIND_NOTIFICATION_REMOVED\x10\x10*\x7f\n" +
 	"\x10DaemonPromptKind\x12\"\n" +
 	"\x1eDAEMON_PROMPT_KIND_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bDAEMON_PROMPT_KIND_PAIR_SAS\x10\x01\x12&\n" +
@@ -2497,7 +2815,7 @@ func file_openair_v1_daemon_proto_rawDescGZIP() []byte {
 }
 
 var file_openair_v1_daemon_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_openair_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_openair_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_openair_v1_daemon_proto_goTypes = []any{
 	(DaemonMessageType)(0),           // 0: openair.v1.DaemonMessageType
 	(DaemonEventKind)(0),             // 1: openair.v1.DaemonEventKind
@@ -2529,28 +2847,35 @@ var file_openair_v1_daemon_proto_goTypes = []any{
 	(*DaemonBrowseResponse)(nil),     // 27: openair.v1.DaemonBrowseResponse
 	(*DaemonFetchRequest)(nil),       // 28: openair.v1.DaemonFetchRequest
 	(*DaemonFetchResponse)(nil),      // 29: openair.v1.DaemonFetchResponse
-	(ProtectionTier)(0),              // 30: openair.v1.ProtectionTier
-	(TrustLevel)(0),                  // 31: openair.v1.TrustLevel
-	(*ClipboardPush)(nil),            // 32: openair.v1.ClipboardPush
-	(*FileStat)(nil),                 // 33: openair.v1.FileStat
+	(*DaemonNotifyRequest)(nil),      // 30: openair.v1.DaemonNotifyRequest
+	(*DaemonNotifyResponse)(nil),     // 31: openair.v1.DaemonNotifyResponse
+	(*DaemonDismissRequest)(nil),     // 32: openair.v1.DaemonDismissRequest
+	(*DaemonDismissResponse)(nil),    // 33: openair.v1.DaemonDismissResponse
+	(ProtectionTier)(0),              // 34: openair.v1.ProtectionTier
+	(TrustLevel)(0),                  // 35: openair.v1.TrustLevel
+	(*Posted)(nil),                   // 36: openair.v1.Posted
+	(*ClipboardPush)(nil),            // 37: openair.v1.ClipboardPush
+	(*FileStat)(nil),                 // 38: openair.v1.FileStat
 }
 var file_openair_v1_daemon_proto_depIdxs = []int32{
-	30, // 0: openair.v1.DaemonStatusResponse.protection_tier:type_name -> openair.v1.ProtectionTier
-	31, // 1: openair.v1.DaemonDevice.level:type_name -> openair.v1.TrustLevel
-	30, // 2: openair.v1.DaemonDevice.protection_tier:type_name -> openair.v1.ProtectionTier
+	34, // 0: openair.v1.DaemonStatusResponse.protection_tier:type_name -> openair.v1.ProtectionTier
+	35, // 1: openair.v1.DaemonDevice.level:type_name -> openair.v1.TrustLevel
+	34, // 2: openair.v1.DaemonDevice.protection_tier:type_name -> openair.v1.ProtectionTier
 	6,  // 3: openair.v1.DaemonDeviceListResponse.devices:type_name -> openair.v1.DaemonDevice
 	1,  // 4: openair.v1.DaemonEvent.kind:type_name -> openair.v1.DaemonEventKind
-	2,  // 5: openair.v1.DaemonPrompt.kind:type_name -> openair.v1.DaemonPromptKind
-	32, // 6: openair.v1.DaemonClipboardRequest.push:type_name -> openair.v1.ClipboardPush
-	30, // 7: openair.v1.DaemonUnlockResponse.protection_tier:type_name -> openair.v1.ProtectionTier
-	31, // 8: openair.v1.DaemonTrustRequest.level:type_name -> openair.v1.TrustLevel
-	31, // 9: openair.v1.DaemonTrustResponse.level:type_name -> openair.v1.TrustLevel
-	33, // 10: openair.v1.DaemonBrowseResponse.entries:type_name -> openair.v1.FileStat
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	36, // 5: openair.v1.DaemonEvent.notification:type_name -> openair.v1.Posted
+	2,  // 6: openair.v1.DaemonPrompt.kind:type_name -> openair.v1.DaemonPromptKind
+	37, // 7: openair.v1.DaemonClipboardRequest.push:type_name -> openair.v1.ClipboardPush
+	34, // 8: openair.v1.DaemonUnlockResponse.protection_tier:type_name -> openair.v1.ProtectionTier
+	35, // 9: openair.v1.DaemonTrustRequest.level:type_name -> openair.v1.TrustLevel
+	35, // 10: openair.v1.DaemonTrustResponse.level:type_name -> openair.v1.TrustLevel
+	38, // 11: openair.v1.DaemonBrowseResponse.entries:type_name -> openair.v1.FileStat
+	36, // 12: openair.v1.DaemonNotifyRequest.notification:type_name -> openair.v1.Posted
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_openair_v1_daemon_proto_init() }
@@ -2559,6 +2884,7 @@ func file_openair_v1_daemon_proto_init() {
 		return
 	}
 	file_openair_v1_clipboard_proto_init()
+	file_openair_v1_notifications_proto_init()
 	file_openair_v1_remotefs_proto_init()
 	file_openair_v1_common_proto_init()
 	type x struct{}
@@ -2567,7 +2893,7 @@ func file_openair_v1_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_openair_v1_daemon_proto_rawDesc), len(file_openair_v1_daemon_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   27,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

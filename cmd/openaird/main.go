@@ -52,6 +52,12 @@ func main() {
 		"directories paired Owned devices may browse and read, comma-separated (M10, §11)")
 	stunServers := flag.String("stun", "",
 		"STUN servers for hole punching, comma-separated (default: the rendezvous server)")
+	flag.BoolVar(&cfg.AutoClipboard, "auto-clipboard", false,
+		"push this machine's clipboard to connected devices as it changes, and apply theirs (M13, opt-in)")
+	notifyAllow := flag.String("notify-allow", "",
+		"only mirror notifications from these app ids, comma-separated (PRD R22)")
+	notifyBlock := flag.String("notify-block", "",
+		"mirror every notification except these app ids, comma-separated")
 	flag.Parse()
 
 	rv, err := daemon.ParseRendezvous(*rendezvousAddr)
@@ -66,6 +72,8 @@ func main() {
 	}
 	cfg.Relay = relayCfg
 	cfg.Shares = parseShares(*shares)
+	cfg.NotifyAllow = splitList(*notifyAllow)
+	cfg.NotifyBlock = splitList(*notifyBlock)
 	cfg.STUN = splitList(*stunServers)
 
 	if !quiet {

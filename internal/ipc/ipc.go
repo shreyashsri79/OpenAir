@@ -68,6 +68,10 @@ const (
 	MsgBrowseResponse     = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE)
 	MsgFetchRequest       = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_FETCH_REQUEST)
 	MsgFetchResponse      = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_FETCH_RESPONSE)
+	MsgNotifyRequest      = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_NOTIFY_REQUEST)
+	MsgNotifyResponse     = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_NOTIFY_RESPONSE)
+	MsgDismissRequest     = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_DISMISS_REQUEST)
+	MsgDismissResponse    = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_DISMISS_RESPONSE)
 )
 
 // isReply reports whether a message type answers an earlier request of ours.
@@ -84,7 +88,8 @@ func isReply(t uint16) bool {
 	case MsgStatusResponse, MsgDeviceListResponse, MsgSendResponse,
 		MsgPairResponse, MsgSubscribeResponse, MsgClipboardResponse,
 		MsgUnlockResponse, MsgLockResponse, MsgTrustResponse,
-		MsgBrowseResponse, MsgFetchResponse, MsgError:
+		MsgBrowseResponse, MsgFetchResponse,
+		MsgNotifyResponse, MsgDismissResponse, MsgError:
 		return true
 	}
 	return false

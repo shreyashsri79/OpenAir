@@ -100,6 +100,10 @@ func (d *Daemon) handle(ctx context.Context, c *client, msgType uint16, payload 
 		d.onBrowse(ctx, c, payload)
 	case ipc.MsgFetchRequest:
 		d.onFetch(ctx, c, payload)
+	case ipc.MsgNotifyRequest:
+		d.onNotify(ctx, c, payload)
+	case ipc.MsgDismissRequest:
+		d.onDismissRequest(ctx, c, payload)
 	default:
 		d.cfg.Logf("ipc: ignoring unknown message type %d", msgType)
 	}
@@ -424,6 +428,17 @@ func (d *Daemon) onClipboard(ctx context.Context, c *client, payload []byte) {
 // `openair watch` shows the text even on a headless box.
 func (d *Daemon) onClipboardReceived(ctx context.Context, peer identity.Peer, content clipboard.Content) error {
 	d.cfg.Logf("clipboard from %s: %d bytes", peer.DeviceID.Fingerprint(), len(content.Bytes))
+
+	// M13's loop suppression, which applies whether or not the watcher is
+	// running: content already here is not re-applied, and content older than
+	// this device's own last copy loses a simultaneous edit (§9's origin_ts).
+	if !d.clipState.ShouldApply(content.Text(), content.OriginTS) {
+		return nil
+	}
+	// Recorded *before* the write: the write is a subprocess, and a watcher
+	// poll landing in between would see peer content it had no record of and
+	// send it straight back.
+	d.clipState.Applied(content.Text())
 	d.broadcast(&openairv1.DaemonEvent{
 		Kind:     openairv1.DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD,
 		DeviceId: string(peer.DeviceID),
