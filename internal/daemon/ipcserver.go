@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/ipc"
@@ -320,16 +321,65 @@ func (d *Daemon) onTransferComplete(transferID string, ok bool) {
 	})
 }
 
-// onClipboard is M5's entry point. Until then the request is answered rather
-// than ignored, so a client learns the daemon cannot do it instead of waiting
-// out its timeout.
-func (d *Daemon) onClipboard(_ context.Context, c *client, payload []byte) {
+// onClipboard pushes clipboard content to a device (§9, M5).
+//
+// The request carries the network `ClipboardPush` verbatim, which is the point
+// of D-29: a tray UI pushing the clipboard emits the same bytes the wire
+// carries, and there is no translation layer here to keep in sync.
+func (d *Daemon) onClipboard(ctx context.Context, c *client, payload []byte) {
 	var req openairv1.DaemonClipboardRequest
 	if !unmarshal(c, payload, &req) {
 		return
 	}
-	_ = c.peer.ReplyError(req.GetRequestId(), session.CodeCapabilityUnavailable,
-		"clipboard is not implemented in this build")
+	push := req.GetPush()
+	if push == nil {
+		_ = c.peer.ReplyError(req.GetRequestId(), 0, "no clipboard content given")
+		return
+	}
+
+	sess, err := d.sessionTo(ctx, req.GetTarget())
+	if err != nil {
+		_ = c.peer.ReplyError(req.GetRequestId(), 0, "%v", err)
+		return
+	}
+	if err := d.clip.Push(ctx, sess, push.GetMime(), push.GetContent()); err != nil {
+		code := session.CodeNoError
+		if pc, ok := session.ErrorCodeOf(err); ok {
+			code = pc
+		} else if errors.Is(err, clipboard.ErrTooLarge) {
+			code = session.CodeResourceExhausted
+		}
+		_ = c.peer.ReplyError(req.GetRequestId(), code, "%v", err)
+		return
+	}
+	_ = c.peer.Reply(ipc.MsgClipboardResponse, req.GetRequestId(), &openairv1.DaemonClipboardResponse{})
+}
+
+// onClipboardReceived applies an inbound push, or says why it could not.
+//
+// Failing to reach a system clipboard is not an error the peer should see: the
+// content arrived and was accepted, and whether this machine has somewhere to
+// paste it is not the sender's problem. It is reported as an event instead, so
+// `openair watch` shows the text even on a headless box.
+func (d *Daemon) onClipboardReceived(ctx context.Context, peer identity.Peer, content clipboard.Content) error {
+	d.cfg.Logf("clipboard from %s: %d bytes", peer.DeviceID.Fingerprint(), len(content.Bytes))
+	d.broadcast(&openairv1.DaemonEvent{
+		Kind:     openairv1.DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD,
+		DeviceId: string(peer.DeviceID),
+		Text:     content.Text(),
+		Ok:       true,
+	})
+
+	// The OS write runs off this goroutine. It is a subprocess on most
+	// platforms, and this one is the session's per-capability queue (D-41):
+	// blocking it behind a clipboard helper would stall every later message
+	// from the same peer.
+	go func() {
+		if err := clipboard.WriteOS(context.WithoutCancel(ctx), content.Text()); err != nil {
+			d.cfg.Logf("clipboard from %s not applied: %v", peer.DeviceID.Fingerprint(), err)
+		}
+	}()
+	return nil
 }
 
 // trustLevelToWire converts a stored trust level to its schema value. The two

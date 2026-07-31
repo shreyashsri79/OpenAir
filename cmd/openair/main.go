@@ -46,6 +46,7 @@ usage:
   openair discover [--for DURATION] [--watch]
   openair recv [--listen ADDR] [--dir DIR] [--keys DIR] [--yes] [--no-announce]
   openair send [--keys DIR] FILE... DEVICE|ADDR
+  openair clip push DEVICE|ADDR [TEXT]
 
 commands:
   status    what the daemon is doing
@@ -55,6 +56,7 @@ commands:
   discover  list the OpenAir devices on this network
   recv      listen for an inbound transfer and write it to --dir
   send      offer FILE... to a device, named or at an explicit host:port
+  clip      push this machine's clipboard, or the text you give, to a device
 
 With openaird running, pair and send go through it -- one listener, one
 identity, and inbound transfers arrive whether or not a terminal is open. Pass
@@ -89,6 +91,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runRecv(args[1:], stdin, stdout)
 	case "send":
 		return runSend(args[1:], stdin, stdout)
+	case "clip":
+		return runClip(args[1:], stdin, stdout)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return nil

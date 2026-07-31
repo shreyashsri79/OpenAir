@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
 	"github.com/shreyashsri79/openair/internal/conn"
 	"github.com/shreyashsri79/openair/internal/discovery"
@@ -104,6 +105,7 @@ type Daemon struct {
 	store   *identity.FileTrustStore
 	pairs   *pairing.Handler
 	files   *files.Capability
+	clip    *clipboard.Capability
 	ln      conn.Listener
 	ipcLn   net.Listener
 	disco   *discovery.Discovery
@@ -184,11 +186,21 @@ func New(cfg Config) (*Daemon, error) {
 		OnComplete: d.onTransferComplete,
 	})
 
+	// The clipboard runs on the identity key and is registered unconditionally
+	// (D-20): a device with no system clipboard still accepts pushes and
+	// reports them, because a headless machine having nowhere to paste is not a
+	// reason for the peer's push to fail.
+	d.clip = clipboard.New(clipboard.Config{
+		Tag:       string(id.DeviceID()),
+		OnReceive: d.onClipboardReceived,
+	})
+
 	// capID 0 is registered so a peer that revokes this device mid-session is
 	// honoured while a transfer is still running (§6.1).
 	handlers := map[byte]session.Handler{
-		0:           d.pairs,
-		files.CapID: d.files,
+		0:               d.pairs,
+		files.CapID:     d.files,
+		clipboard.CapID: d.clip,
 	}
 	d.ln, err = conn.Listen(cfg.Listen, id, cfg.DisplayName, platform(), handlers, d.authorize)
 	if err != nil {
@@ -249,6 +261,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.cfg.Logf("device %s listening on %s, writing to %s",
 		d.id.DeviceID().Fingerprint(), d.ln.Addr(), d.cfg.DestDir)
 	d.cfg.Logf("ipc on %s", d.cfg.SocketPath)
+	if !clipboard.HaveOS() {
+		d.cfg.Logf("no system clipboard here; inbound pushes will be reported, not pasted")
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(3)

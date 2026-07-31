@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
 	"github.com/shreyashsri79/openair/internal/conn"
 	"github.com/shreyashsri79/openair/internal/identity"
@@ -111,10 +112,27 @@ func receive(ctx context.Context, o recvOptions, stdin io.Reader, stdout io.Writ
 		return nil
 	}
 
+	// Clipboard rides the same session (§9, M5). It is registered here so that
+	// two processes running without a daemon can still push to each other;
+	// with a daemon, openaird is the one holding the listener and this path is
+	// not the one in use.
+	clip := clipboard.New(clipboard.Config{
+		Tag: string(id.DeviceID()),
+		OnReceive: func(ctx context.Context, peer identity.Peer, c clipboard.Content) error {
+			fmt.Fprintf(stdout, "\nclipboard from %s: %d bytes\n", fingerprint(peer.DeviceID), len(c.Bytes))
+			if err := clipboard.WriteOS(ctx, c.Text()); err != nil {
+				// Not the sender's problem: the content arrived and was
+				// accepted, and this machine simply has nowhere to paste it.
+				fmt.Fprintf(stdout, "  (not applied: %v)\n", err)
+			}
+			return nil
+		},
+	})
+
 	// capID 0 is registered too, so a peer that revokes this device mid-session
 	// is honoured while the transfer is still running (§6.1).
 	ln, err := conn.Listen(o.listen, id, hostname(), platform(),
-		map[byte]session.Handler{files.CapID: cap, 0: pairHandler}, authorize)
+		map[byte]session.Handler{files.CapID: cap, clipboard.CapID: clip, 0: pairHandler}, authorize)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

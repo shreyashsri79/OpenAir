@@ -186,7 +186,12 @@ func (l *listener) handshake(qc *quic.Conn) {
 		Authorize:   l.authorize,
 	})
 	if err != nil {
-		code := session.CodeProtocolViolation
+		// A refusal that is not a protocol error is the authorize callback
+		// turning an unpaired peer away (M2), and NOT_PAIRED is what §10 has
+		// for that. Reporting PROTOCOL_VIOLATION instead would tell the peer it
+		// had malformed something, and send its user looking in the wrong
+		// place.
+		code := session.CodeNotPaired
 		if c, ok := session.ErrorCodeOf(err); ok {
 			code = c
 		}

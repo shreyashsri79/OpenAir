@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
 	"github.com/shreyashsri79/openair/internal/conn"
 	"github.com/shreyashsri79/openair/internal/discovery"
@@ -75,6 +76,19 @@ func (d *Daemon) sessionTo(ctx context.Context, target string) (session.Session,
 
 	sess, err := d.dialFirst(ctx, addrs)
 	if err != nil {
+		// The far end refuses an unpaired peer during Hello (M2), so this dial
+		// fails before the local check below is ever reached. The advice is the
+		// same, and the caller needs it rather than a transport error.
+		if code, ok := session.ErrorCodeOf(err); ok {
+			switch code {
+			case session.CodeNotPaired:
+				return nil, fmt.Errorf("that device has not paired with this one; "+
+					"run `openair pair` on both ends first: %w", err)
+			case session.CodeKeyMismatch:
+				return nil, fmt.Errorf("the device at that address is not the one you paired; "+
+					"re-pair with `openair pair`: %w", err)
+			}
+		}
 		return nil, err
 	}
 
@@ -155,8 +169,9 @@ func (d *Daemon) dialFirst(ctx context.Context, addrs []string) (session.Session
 		return nil, errors.New("no address to dial")
 	}
 	dialer := conn.NewDialer(d.id, d.cfg.DisplayName, platform(), map[byte]session.Handler{
-		0:           d.pairs,
-		files.CapID: d.files,
+		0:               d.pairs,
+		files.CapID:     d.files,
+		clipboard.CapID: d.clip,
 	})
 
 	var lastErr error

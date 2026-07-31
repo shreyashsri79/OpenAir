@@ -54,7 +54,7 @@ func (d *dialer) DialAddr(ctx context.Context, addr string, pinned identity.Peer
 	// replaces quic-go's default CUBIC sender with OpenAir's BBR (D-14, D-16).
 	congestion.Use(qc)
 
-	return session.New(ctx, qc, session.Config{
+	sess, err := session.New(ctx, qc, session.Config{
 		Local:       d.local,
 		Peer:        pinned,
 		DisplayName: d.displayName,
@@ -62,6 +62,34 @@ func (d *dialer) DialAddr(ctx context.Context, addr string, pinned identity.Peer
 		Handlers:    d.handlers,
 		Initiator:   true,
 	})
+	if err != nil {
+		return nil, translateRemoteClose(err)
+	}
+	return sess, nil
+}
+
+// translateRemoteClose turns "the peer closed the connection with application
+// error 0x04" into an error carrying that §10 code.
+//
+// Without this, a peer's refusal reaches the caller as quic-go's own error
+// string and every layer above has to parse prose to find out what happened.
+// With it, session.ErrorCodeOf works on a dial failure exactly as it works on a
+// local one, and the CLI can say "that device has not paired with this one"
+// instead of quoting a transport error at the user.
+func translateRemoteClose(err error) error {
+	var appErr *quic.ApplicationError
+	if !errors.As(err, &appErr) || !appErr.Remote {
+		return err
+	}
+	code := session.ErrorCode(appErr.ErrorCode)
+	if code == session.CodeNoError {
+		return err
+	}
+	return &session.ProtocolError{
+		Code: code,
+		Msg:  "the peer closed the connection",
+		Err:  err,
+	}
 }
 
 // Dial resolves a peer by DeviceID via discovery or rendezvous. Phase 2

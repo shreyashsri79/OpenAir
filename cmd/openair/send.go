@@ -158,7 +158,7 @@ func sendDirect(ctx context.Context, o sendOptions, stdin io.Reader, stdout io.W
 	// one is actually routable from here.
 	sess, err := dialFirst(ctx, d, addrs)
 	if err != nil {
-		return err
+		return explainRefusal(err)
 	}
 	defer sess.Close(0, "done")
 
@@ -205,6 +205,26 @@ func targetAddrs(ctx context.Context, o sendOptions, id *identity.FileIdentity, 
 	defer cancel()
 
 	return resolveTarget(lookupCtx, d, o.addr, stdout)
+}
+
+// explainRefusal turns the far end hanging up into something a user can act on.
+//
+// A device that refuses an unpaired peer closes the connection during Hello
+// (M2), so the dial fails before this side reaches its own trust-store check.
+// The advice is the same either way, and quoting a transport error at the user
+// instead would leave them with nowhere to go.
+func explainRefusal(err error) error {
+	if code, ok := session.ErrorCodeOf(err); ok {
+		switch code {
+		case session.CodeNotPaired:
+			return fmt.Errorf("that device has not paired with this one; "+
+				"run `openair pair` on both ends first (%w); nothing was sent", err)
+		case session.CodeKeyMismatch:
+			return fmt.Errorf("the device at that address is not the one you paired; "+
+				"re-pair with `openair pair` (%w); nothing was sent", err)
+		}
+	}
+	return err
 }
 
 // dialFirst tries each address in turn and returns the first session that comes

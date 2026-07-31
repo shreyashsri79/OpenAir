@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/identity"
 	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
 )
@@ -367,4 +368,86 @@ func TestSessionsAreDroppedWhenTheyEnd(t *testing.T) {
 func digest(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// TestClipboardPushBetweenTwoDaemons is M5 end to end: `openair clip push` in
+// its daemon form, with the emoji case that catches a byte-oriented mistake.
+//
+// The receiving daemon has no system clipboard in a test environment, which is
+// deliberately not a failure: the content is accepted and reported as an event,
+// and whether this machine has somewhere to paste it is not the sender's
+// problem.
+func TestClipboardPushBetweenTwoDaemons(t *testing.T) {
+	a := newTestDaemon(t, nil)
+	b := newTestDaemon(t, nil)
+	pinEachOther(t, a, b)
+
+	const text = "café 👩‍💻 日本語\nsecond line"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	got := make(chan string, 4)
+	watcher := connect(t, b, func(ev *openairv1.DaemonEvent) {
+		if ev.GetKind() == openairv1.DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD {
+			got <- ev.GetText()
+		}
+	}, nil)
+	if err := watcher.Subscribe(ctx, false); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	sender := connect(t, a, nil, nil)
+	err := sender.Clipboard(ctx, b.Addr(), &openairv1.ClipboardPush{
+		Mime:    clipboard.TextMIME,
+		Content: []byte(text),
+	})
+	if err != nil {
+		t.Fatalf("Clipboard: %v", err)
+	}
+
+	select {
+	case have := <-got:
+		if have != text {
+			t.Fatalf("received %q, want %q", have, text)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the push never reached the other daemon")
+	}
+}
+
+// TestOversizedClipboardPushIsRefused: §9 says reject rather than buffer, and
+// the refusal has to reach the caller rather than being swallowed.
+func TestOversizedClipboardPushIsRefused(t *testing.T) {
+	a := newTestDaemon(t, nil)
+	b := newTestDaemon(t, nil)
+	pinEachOther(t, a, b)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	applied := make(chan string, 1)
+	watcher := connect(t, b, func(ev *openairv1.DaemonEvent) {
+		if ev.GetKind() == openairv1.DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD {
+			applied <- ev.GetText()
+		}
+	}, nil)
+	if err := watcher.Subscribe(ctx, false); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	sender := connect(t, a, nil, nil)
+	err := sender.Clipboard(ctx, b.Addr(), &openairv1.ClipboardPush{
+		Mime:    clipboard.TextMIME,
+		Content: []byte(strings.Repeat("x", clipboard.DefaultMaxBytes+1)),
+	})
+	if err == nil {
+		t.Fatal("an oversized push was accepted")
+	}
+
+	select {
+	case have := <-applied:
+		t.Fatalf("oversized content was applied anyway (%d bytes)", len(have))
+	case <-time.After(500 * time.Millisecond):
+	}
 }

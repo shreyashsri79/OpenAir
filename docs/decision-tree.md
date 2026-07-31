@@ -63,6 +63,8 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-51 | — | What carries daemon IPC, concretely? | **accepted** — capID 7, `request_id` field 1 everywhere |
 | D-52 | — | Where does an inbound Hello run? | **accepted** — off the accept path; a refusal is not fatal |
 | D-53 | — | Who answers for an unattended daemon? | **accepted** — nobody watching means refused |
+| D-54 | — | How does the core reach a system clipboard? | **accepted** — the desktop's own helper, as a subprocess |
+| D-55 | — | What does a refused peer hear? | **accepted** — NOT_PAIRED, and the dialler translates it |
 
 **Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; the port has now landed (D-35, D-36), so what remains is comparing BBRv1 against D-17's Cubic baseline.
 
@@ -156,6 +158,11 @@ flowchart TD
     Q10{"M4<br/>Where does an inbound Hello run?"}:::question
     Q10 ==chosen==> D52["D-52 · on its own goroutine, bounded at 32,<br/>with a 10 s deadline. A refused peer becomes a<br/>HandshakeError, which does not end the loop"]:::accepted
     Q10 -.rejected.-> R10A["inline on the accept path, as M1 had it<br/>one peer that connects and says nothing<br/>stops every other device from arriving"]:::rejected
+
+    Q11{"§9 / M5<br/>How does the core reach a system clipboard?"}:::question
+    Q11 ==chosen==> D54["D-54 · exec the desktop's own helper —<br/>wl-copy, xclip, xsel, pbcopy, Set-Clipboard.<br/>No display dependency in a daemon that<br/>mostly runs without one"]:::accepted
+    Q11 -.rejected.-> R11A["cgo X11/Wayland binding<br/>a build dependency per platform,<br/>and the Windows cross-build gate<br/>would need it too"]:::rejected
+    D54 -.constrained by.-> D54N["wl-copy forks and holds the selection.<br/>Give it an exec pipe for stderr and Run<br/>blocks until the user copies something else"]:::evidence
 
     Q7{"ADR-6<br/>Keep consensus and replication?"}:::question
     Q7 ==chosen==> D11["D-11 · dropped<br/>every capability is a pairwise session;<br/>pairwise needs no agreement protocol"]:::accepted
@@ -1027,3 +1034,19 @@ Decision: the daemon asks every subscribed client that offered to answer prompts
 Rationale: the failure has to be the safe one. A daemon that accepted a transfer because nobody was looking would write a stranger's files to disk on the strength of an unattended socket; a daemon that refuses one costs the user a retry with `openair watch` running, and `openair status` says exactly that when it is the case. First answer rather than unanimity, because two open UIs are two views of one user and requiring agreement would hang on whichever one nobody is looking at.
 Alternatives considered: *queue the prompt until someone connects* (rejected — the peer is waiting on the other side of §8.2's accept, and a transfer that hangs for an hour is worse for both ends than one that is refused now). *Accept from Owned peers unattended* (deferred, not rejected — that is M6's unlock token and it does not exist yet; `files.Config`'s nil-Accept default already encodes it for when it does).
 Consequences: `--accept-all` is the headless posture and it is a real widening — any paired device may then write into the destination directory without asking. It is the honest way to express what a headless install is, and it is visible in `openair status` rather than implicit.
+
+## D-54: The system clipboard is reached by exec'ing the desktop's own helper
+Date: 2026-07-31
+Status: accepted
+Context: M5's `clipboard` capability (§9) is pure Go and needs no platform code. Putting content *into* a clipboard does: X11 and Wayland have no in-process API without a binding, Windows needs the clipboard API or PowerShell, macOS has `pbcopy`.
+Decision: exec the helper the user's desktop already ships — `wl-copy`/`wl-paste` first on Linux, then `xclip`, then `xsel`; `pbcopy`/`pbpaste` on macOS; `Set-Clipboard`/`Get-Clipboard` via PowerShell on Windows. Wayland is tried before X because on a Wayland session `xclip` talks to XWayland and reaches a clipboard half the applications cannot see. Absence of any helper is `ErrNoClipboard`, a normal condition and not a failure: a headless daemon still accepts pushes and reports them as events, because whether this machine has somewhere to paste is not the sender's problem.
+Alternatives considered: *a cgo X11/Wayland binding* (rejected — it puts a display dependency into a daemon that mostly runs without one, and the `GOOS=windows` build gate from D-32 would have to carry it too). *A pure-Go X11 client* (rejected — it solves one of three platforms and still needs a Wayland path).
+Consequences, and the one that cost an afternoon: **`wl-copy` forks a child that holds the selection until something replaces it.** Give the command an `os/exec` pipe for stderr — which is what assigning a `bytes.Buffer` does — and the forked child inherits it, so `cmd.Run` blocks until the pipe reaches EOF, which is to say until the user copies something else. The daemon's receive path hung on exactly this, silently, with no error anywhere. The fix is a real file rather than a pipe, plus `cmd.WaitDelay`. The OS write also runs off the session's per-capability queue (D-41): a subprocess on that goroutine would stall every later message from the same peer.
+
+## D-55: A refused peer is told NOT_PAIRED, and the dialler translates the code back
+Date: 2026-07-31
+Status: accepted (refines D-52)
+Context: D-52 made the listener close a connection whose handshake failed. The first implementation closed with `PROTOCOL_VIOLATION` for anything that was not already a `ProtocolError` — which is precisely the case an unpaired peer produces, since the authorize callback returns an ordinary error. The peer was therefore told it had malformed something, and its user sent looking in the wrong place. It also changed where the failure surfaces: the sending side used to reach its own trust-store check, and now the far end hangs up during Hello, before that check runs.
+Decision: an authorize refusal closes with **`NOT_PAIRED` (§10, 0x04)**. And `conn.DialAddr` translates a remote application-error close into a `session.ProtocolError` carrying that code, so `session.ErrorCodeOf` works on a dial failure exactly as it does on a local one.
+Rationale: the code is the only thing the far end can act on, so it has to name what actually happened. The translation is what lets the layer with a user in front of it say "that device has not paired with this one; run `openair pair` on both ends" instead of quoting `Application error 0x1 (remote)`. Both the CLI and the daemon do exactly that.
+Consequences: the failure is now detected earlier — before any file is opened — which is better, but it means a caller's own pairing check is no longer the thing that produces the message. `TestSendRefusesUnpairedPeer` still asserts the advice reaches the user, and it now does so through the remote code rather than the local store.
