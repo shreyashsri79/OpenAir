@@ -82,6 +82,9 @@ Purpose: mechanically enforce the build plan's definition of done (D-44).
 - `netem.yml` — the shaped-network matrix, `workflow_dispatch` only. Hosted runners block `unshare -Urn` by AppArmor default; the sysctl workaround is present but unverified, and a nightly job that is always red is worse than none.
 - Not gated: `openair-gui` (needs system GL/X11 packages), `buf generate` reproducibility, and the end-to-end-on-real-hardware condition, which no CI job can substitute for.
 
+## The quic-go fork (outside this repo)
+Purpose: the two Windows offload patches ADR-8 calls for. They live in a local checkout at `~/Work/quic-go-openair` on top of `apernet/quic-go` `599b15a1`, as two individually upstreamable commits — Windows send-offload error classification, and a `winConn` implementing USO (`UDP_SEND_MSG_SIZE`) and URO (`UDP_RECV_MAX_COALESCED_SIZE`). Nothing is published and `go.mod` carries no `replace`, so a normal build of this repo does not use them (D-50). They build and vet for `GOOS=windows`; their tests have never run, because that needs Windows.
+
 ## docs/threat-model.md — PRD R29
 Purpose: assembles the security reasoning scattered across the decision log and PROTOCOL.md into something a reader can evaluate whole. Assets, five trust boundaries, eight adversaries, what rendezvous and relay operators each learn, accepted weaknesses, and non-goals. Every claim cites a section or decision. §7 is the part to read: ten open questions, four of which need a maintainer decision (D-43).
 
