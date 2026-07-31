@@ -26,6 +26,7 @@ import (
 
 	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
+	"github.com/shreyashsri79/openair/internal/caps/remotefs"
 	"github.com/shreyashsri79/openair/internal/conn"
 	"github.com/shreyashsri79/openair/internal/discovery"
 	"github.com/shreyashsri79/openair/internal/identity"
@@ -92,6 +93,12 @@ type Config struct {
 	// (M8, §17). Empty disables it.
 	Relay RelayConfig
 
+	// Shares are the directories this device offers for browsing (M10, §11).
+	// Empty shares nothing, which is what a daemon started without --share
+	// does: remotefs is registered either way, and answers every request with
+	// UNAUTHORISED.
+	Shares []remotefs.Root
+
 	// STUN lists servers to ask for this device's reflexive address before
 	// punching (M9, §18). Empty means "the rendezvous server", which answers
 	// STUN on its own port (D-68), and nothing at all if none is configured:
@@ -124,6 +131,7 @@ type Daemon struct {
 	pairs    *pairing.Handler
 	files    *files.Capability
 	clip     *clipboard.Capability
+	rfs      *remotefs.Capability
 	endpoint *conn.Endpoint
 	ln       conn.Listener
 	ipcLn    net.Listener
@@ -241,6 +249,16 @@ func New(cfg Config) (*Daemon, error) {
 	// (D-20): a device with no system clipboard still accepts pushes and
 	// reports them, because a headless machine having nowhere to paste is not a
 	// reason for the peer's push to fail.
+	// remotefs is registered whether or not anything is shared, because the
+	// client half of it lives here too: this daemon browses other devices even
+	// when it offers nothing of its own. A source with no roots refuses every
+	// request, which is the correct answer rather than a missing capability.
+	d.rfs = remotefs.New(remotefs.Config{
+		Roots:      cfg.Shares,
+		Thumbnails: len(cfg.Shares) > 0,
+		Logf:       cfg.Logf,
+	})
+
 	d.clip = clipboard.New(clipboard.Config{
 		Tag:       string(id.DeviceID()),
 		OnReceive: d.onClipboardReceived,
@@ -412,6 +430,7 @@ func (d *Daemon) handlers() map[byte]session.Handler {
 		0:               &controlHandler{d: d},
 		files.CapID:     d.files,
 		clipboard.CapID: d.clip,
+		remotefs.CapID:  d.rfs,
 	}
 }
 

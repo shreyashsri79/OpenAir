@@ -22,7 +22,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
+	"github.com/shreyashsri79/openair/internal/caps/remotefs"
 	"github.com/shreyashsri79/openair/internal/daemon"
 	"github.com/shreyashsri79/openair/internal/identity"
 )
@@ -46,6 +48,10 @@ func main() {
 		"rendezvous server as host:port@deviceid, so paired devices can find this one across networks")
 	relayAddr := flag.String("relay", "",
 		"relay server as host:port@deviceid, to stay reachable where no direct path works")
+	shares := flag.String("share", "",
+		"directories paired Owned devices may browse and read, comma-separated (M10, §11)")
+	stunServers := flag.String("stun", "",
+		"STUN servers for hole punching, comma-separated (default: the rendezvous server)")
 	flag.Parse()
 
 	rv, err := daemon.ParseRendezvous(*rendezvousAddr)
@@ -59,6 +65,8 @@ func main() {
 		log.Fatal(err)
 	}
 	cfg.Relay = relayCfg
+	cfg.Shares = parseShares(*shares)
+	cfg.STUN = splitList(*stunServers)
 
 	if !quiet {
 		cfg.Logf = func(format string, args ...any) { log.Printf(format, args...) }
@@ -104,4 +112,29 @@ func defaultDestDir() string {
 func dirExists(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.IsDir()
+}
+
+// parseShares reads the --share list. A share is named by the base name of its
+// directory, which is what a peer sees as the first path component (§11.1,
+// D-72), or by "name=/path" when two shares would otherwise collide.
+func parseShares(list string) []remotefs.Root {
+	var out []remotefs.Root
+	for _, item := range splitList(list) {
+		name, dir, hasName := strings.Cut(item, "=")
+		if !hasName {
+			name, dir = "", item
+		}
+		out = append(out, remotefs.Root{Name: name, Path: dir})
+	}
+	return out
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, item := range strings.Split(s, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }

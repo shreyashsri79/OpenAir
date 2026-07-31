@@ -175,3 +175,48 @@ func (c *Client) Trust(ctx context.Context, deviceID string, level openairv1.Tru
 	}
 	return resp.GetLevel(), nil
 }
+
+// Browse lists what a paired device shares, or what is inside one of its
+// shares (M10, §11). An empty path asks for the share list itself.
+//
+// truncated says more entries remain: ask again at offset+len(entries). §11.1
+// pages listings so a directory of 100k entries is many small answers rather
+// than one envelope nobody can send.
+func (c *Client) Browse(ctx context.Context, device, path string, offset, limit int) (entries []*openairv1.FileStat, truncated bool, err error) {
+	var resp openairv1.DaemonBrowseResponse
+	req := &openairv1.DaemonBrowseRequest{
+		Device: device,
+		Path:   path,
+		Offset: uint32(offset),
+		Limit:  uint32(limit),
+	}
+	if err := c.peer.Do(ctx, ipc.MsgBrowseRequest, req, &resp); err != nil {
+		return nil, false, err
+	}
+	if resp.GetError() != "" {
+		return nil, false, errors.New(resp.GetError())
+	}
+	return resp.GetEntries(), resp.GetTruncated(), nil
+}
+
+// Fetch copies a remote file, or a range of one, to a local path.
+//
+// length 0 means "to the end". The daemon does the range reads and the writing:
+// the shell names a destination and hears how many bytes landed.
+func (c *Client) Fetch(ctx context.Context, device, path, dest string, offset, length uint64) (uint64, error) {
+	var resp openairv1.DaemonFetchResponse
+	req := &openairv1.DaemonFetchRequest{
+		Device: device,
+		Path:   path,
+		Dest:   dest,
+		Offset: offset,
+		Length: length,
+	}
+	if err := c.peer.Do(ctx, ipc.MsgFetchRequest, req, &resp); err != nil {
+		return 0, err
+	}
+	if resp.GetError() != "" {
+		return resp.GetBytesWritten(), errors.New(resp.GetError())
+	}
+	return resp.GetBytesWritten(), nil
+}

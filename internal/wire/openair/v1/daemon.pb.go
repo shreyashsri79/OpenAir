@@ -58,6 +58,10 @@ const (
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_LOCK_RESPONSE        DaemonMessageType = 20
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_TRUST_REQUEST        DaemonMessageType = 21
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_TRUST_RESPONSE       DaemonMessageType = 22
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_BROWSE_REQUEST       DaemonMessageType = 23
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE      DaemonMessageType = 24
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_FETCH_REQUEST        DaemonMessageType = 25
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_FETCH_RESPONSE       DaemonMessageType = 26
 )
 
 // Enum value maps for DaemonMessageType.
@@ -86,6 +90,10 @@ var (
 		20: "DAEMON_MESSAGE_TYPE_LOCK_RESPONSE",
 		21: "DAEMON_MESSAGE_TYPE_TRUST_REQUEST",
 		22: "DAEMON_MESSAGE_TYPE_TRUST_RESPONSE",
+		23: "DAEMON_MESSAGE_TYPE_BROWSE_REQUEST",
+		24: "DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE",
+		25: "DAEMON_MESSAGE_TYPE_FETCH_REQUEST",
+		26: "DAEMON_MESSAGE_TYPE_FETCH_RESPONSE",
 	}
 	DaemonMessageType_value = map[string]int32{
 		"DAEMON_MESSAGE_TYPE_UNSPECIFIED":          0,
@@ -111,6 +119,10 @@ var (
 		"DAEMON_MESSAGE_TYPE_LOCK_RESPONSE":        20,
 		"DAEMON_MESSAGE_TYPE_TRUST_REQUEST":        21,
 		"DAEMON_MESSAGE_TYPE_TRUST_RESPONSE":       22,
+		"DAEMON_MESSAGE_TYPE_BROWSE_REQUEST":       23,
+		"DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE":      24,
+		"DAEMON_MESSAGE_TYPE_FETCH_REQUEST":        25,
+		"DAEMON_MESSAGE_TYPE_FETCH_RESPONSE":       26,
 	}
 )
 
@@ -1923,12 +1935,318 @@ func (x *DaemonError) GetMessage() string {
 	return ""
 }
 
+// DaemonBrowseRequest lists a paired device's shared files (M10, §11).
+//
+// The daemon holds the session and the unlock, so a shell asks for a path and
+// gets entries back; the range reads and the Owned proof happen on the other
+// side of this socket.
+type DaemonBrowseRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"` // name, DeviceID or prefix, as everywhere else
+	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`     // empty lists what that device shares
+	Offset        uint32                 `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`
+	Limit         uint32                 `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonBrowseRequest) Reset() {
+	*x = DaemonBrowseRequest{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonBrowseRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonBrowseRequest) ProtoMessage() {}
+
+func (x *DaemonBrowseRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonBrowseRequest.ProtoReflect.Descriptor instead.
+func (*DaemonBrowseRequest) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *DaemonBrowseRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonBrowseRequest) GetDevice() string {
+	if x != nil {
+		return x.Device
+	}
+	return ""
+}
+
+func (x *DaemonBrowseRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *DaemonBrowseRequest) GetOffset() uint32 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *DaemonBrowseRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type DaemonBrowseResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Entries       []*FileStat            `protobuf:"bytes,2,rep,name=entries,proto3" json:"entries,omitempty"`
+	Truncated     bool                   `protobuf:"varint,3,opt,name=truncated,proto3" json:"truncated,omitempty"` // more remain; ask again at offset + len(entries)
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonBrowseResponse) Reset() {
+	*x = DaemonBrowseResponse{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonBrowseResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonBrowseResponse) ProtoMessage() {}
+
+func (x *DaemonBrowseResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonBrowseResponse.ProtoReflect.Descriptor instead.
+func (*DaemonBrowseResponse) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *DaemonBrowseResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonBrowseResponse) GetEntries() []*FileStat {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *DaemonBrowseResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
+func (x *DaemonBrowseResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// DaemonFetchRequest copies a remote file, or part of one, to a local path.
+//
+// It is remotefs rather than files: the source serves byte ranges and never
+// knows it served a whole file, which is what lets the same primitive back a
+// media player seeking in a 40 GB file (§11.2, PRD R16).
+type DaemonFetchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
+	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	Dest          string                 `protobuf:"bytes,4,opt,name=dest,proto3" json:"dest,omitempty"` // local path to write
+	Offset        uint64                 `protobuf:"varint,5,opt,name=offset,proto3" json:"offset,omitempty"`
+	Length        uint64                 `protobuf:"varint,6,opt,name=length,proto3" json:"length,omitempty"` // 0 means "to the end of the file"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonFetchRequest) Reset() {
+	*x = DaemonFetchRequest{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonFetchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonFetchRequest) ProtoMessage() {}
+
+func (x *DaemonFetchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonFetchRequest.ProtoReflect.Descriptor instead.
+func (*DaemonFetchRequest) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *DaemonFetchRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonFetchRequest) GetDevice() string {
+	if x != nil {
+		return x.Device
+	}
+	return ""
+}
+
+func (x *DaemonFetchRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *DaemonFetchRequest) GetDest() string {
+	if x != nil {
+		return x.Dest
+	}
+	return ""
+}
+
+func (x *DaemonFetchRequest) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *DaemonFetchRequest) GetLength() uint64 {
+	if x != nil {
+		return x.Length
+	}
+	return 0
+}
+
+type DaemonFetchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	BytesWritten  uint64                 `protobuf:"varint,2,opt,name=bytes_written,json=bytesWritten,proto3" json:"bytes_written,omitempty"`
+	Dest          string                 `protobuf:"bytes,3,opt,name=dest,proto3" json:"dest,omitempty"`
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonFetchResponse) Reset() {
+	*x = DaemonFetchResponse{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonFetchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonFetchResponse) ProtoMessage() {}
+
+func (x *DaemonFetchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonFetchResponse.ProtoReflect.Descriptor instead.
+func (*DaemonFetchResponse) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *DaemonFetchResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonFetchResponse) GetBytesWritten() uint64 {
+	if x != nil {
+		return x.BytesWritten
+	}
+	return 0
+}
+
+func (x *DaemonFetchResponse) GetDest() string {
+	if x != nil {
+		return x.Dest
+	}
+	return ""
+}
+
+func (x *DaemonFetchResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_openair_v1_daemon_proto protoreflect.FileDescriptor
 
 const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\n" +
 	"\x17openair/v1/daemon.proto\x12\n" +
-	"openair.v1\x1a\x1aopenair/v1/clipboard.proto\x1a\x17openair/v1/common.proto\"4\n" +
+	"openair.v1\x1a\x1aopenair/v1/clipboard.proto\x1a\x19openair/v1/remotefs.proto\x1a\x17openair/v1/common.proto\"4\n" +
 	"\x13DaemonStatusRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\"\x91\x06\n" +
@@ -2087,7 +2405,34 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\rR\x04code\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage*\xa0\a\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\x8e\x01\n" +
+	"\x13DaemonBrowseRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x16\n" +
+	"\x06device\x18\x02 \x01(\tR\x06device\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\x12\x16\n" +
+	"\x06offset\x18\x04 \x01(\rR\x06offset\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\rR\x05limit\"\x99\x01\n" +
+	"\x14DaemonBrowseResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12.\n" +
+	"\aentries\x18\x02 \x03(\v2\x14.openair.v1.FileStatR\aentries\x12\x1c\n" +
+	"\ttruncated\x18\x03 \x01(\bR\ttruncated\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\xa3\x01\n" +
+	"\x12DaemonFetchRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x16\n" +
+	"\x06device\x18\x02 \x01(\tR\x06device\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\x12\x12\n" +
+	"\x04dest\x18\x04 \x01(\tR\x04dest\x12\x16\n" +
+	"\x06offset\x18\x05 \x01(\x04R\x06offset\x12\x16\n" +
+	"\x06length\x18\x06 \x01(\x04R\x06length\"\x83\x01\n" +
+	"\x13DaemonFetchResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12#\n" +
+	"\rbytes_written\x18\x02 \x01(\x04R\fbytesWritten\x12\x12\n" +
+	"\x04dest\x18\x03 \x01(\tR\x04dest\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error*\xc0\b\n" +
 	"\x11DaemonMessageType\x12#\n" +
 	"\x1fDAEMON_MESSAGE_TYPE_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"DAEMON_MESSAGE_TYPE_STATUS_REQUEST\x10\x01\x12'\n" +
@@ -2112,7 +2457,11 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	" DAEMON_MESSAGE_TYPE_LOCK_REQUEST\x10\x13\x12%\n" +
 	"!DAEMON_MESSAGE_TYPE_LOCK_RESPONSE\x10\x14\x12%\n" +
 	"!DAEMON_MESSAGE_TYPE_TRUST_REQUEST\x10\x15\x12&\n" +
-	"\"DAEMON_MESSAGE_TYPE_TRUST_RESPONSE\x10\x16*\xa2\x04\n" +
+	"\"DAEMON_MESSAGE_TYPE_TRUST_RESPONSE\x10\x16\x12&\n" +
+	"\"DAEMON_MESSAGE_TYPE_BROWSE_REQUEST\x10\x17\x12'\n" +
+	"#DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE\x10\x18\x12%\n" +
+	"!DAEMON_MESSAGE_TYPE_FETCH_REQUEST\x10\x19\x12&\n" +
+	"\"DAEMON_MESSAGE_TYPE_FETCH_RESPONSE\x10\x1a*\xa2\x04\n" +
 	"\x0fDaemonEventKind\x12!\n" +
 	"\x1dDAEMON_EVENT_KIND_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eDAEMON_EVENT_KIND_DEVICE_FOUND\x10\x01\x12!\n" +
@@ -2148,7 +2497,7 @@ func file_openair_v1_daemon_proto_rawDescGZIP() []byte {
 }
 
 var file_openair_v1_daemon_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_openair_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_openair_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_openair_v1_daemon_proto_goTypes = []any{
 	(DaemonMessageType)(0),           // 0: openair.v1.DaemonMessageType
 	(DaemonEventKind)(0),             // 1: openair.v1.DaemonEventKind
@@ -2176,26 +2525,32 @@ var file_openair_v1_daemon_proto_goTypes = []any{
 	(*DaemonTrustRequest)(nil),       // 23: openair.v1.DaemonTrustRequest
 	(*DaemonTrustResponse)(nil),      // 24: openair.v1.DaemonTrustResponse
 	(*DaemonError)(nil),              // 25: openair.v1.DaemonError
-	(ProtectionTier)(0),              // 26: openair.v1.ProtectionTier
-	(TrustLevel)(0),                  // 27: openair.v1.TrustLevel
-	(*ClipboardPush)(nil),            // 28: openair.v1.ClipboardPush
+	(*DaemonBrowseRequest)(nil),      // 26: openair.v1.DaemonBrowseRequest
+	(*DaemonBrowseResponse)(nil),     // 27: openair.v1.DaemonBrowseResponse
+	(*DaemonFetchRequest)(nil),       // 28: openair.v1.DaemonFetchRequest
+	(*DaemonFetchResponse)(nil),      // 29: openair.v1.DaemonFetchResponse
+	(ProtectionTier)(0),              // 30: openair.v1.ProtectionTier
+	(TrustLevel)(0),                  // 31: openair.v1.TrustLevel
+	(*ClipboardPush)(nil),            // 32: openair.v1.ClipboardPush
+	(*FileStat)(nil),                 // 33: openair.v1.FileStat
 }
 var file_openair_v1_daemon_proto_depIdxs = []int32{
-	26, // 0: openair.v1.DaemonStatusResponse.protection_tier:type_name -> openair.v1.ProtectionTier
-	27, // 1: openair.v1.DaemonDevice.level:type_name -> openair.v1.TrustLevel
-	26, // 2: openair.v1.DaemonDevice.protection_tier:type_name -> openair.v1.ProtectionTier
+	30, // 0: openair.v1.DaemonStatusResponse.protection_tier:type_name -> openair.v1.ProtectionTier
+	31, // 1: openair.v1.DaemonDevice.level:type_name -> openair.v1.TrustLevel
+	30, // 2: openair.v1.DaemonDevice.protection_tier:type_name -> openair.v1.ProtectionTier
 	6,  // 3: openair.v1.DaemonDeviceListResponse.devices:type_name -> openair.v1.DaemonDevice
 	1,  // 4: openair.v1.DaemonEvent.kind:type_name -> openair.v1.DaemonEventKind
 	2,  // 5: openair.v1.DaemonPrompt.kind:type_name -> openair.v1.DaemonPromptKind
-	28, // 6: openair.v1.DaemonClipboardRequest.push:type_name -> openair.v1.ClipboardPush
-	26, // 7: openair.v1.DaemonUnlockResponse.protection_tier:type_name -> openair.v1.ProtectionTier
-	27, // 8: openair.v1.DaemonTrustRequest.level:type_name -> openair.v1.TrustLevel
-	27, // 9: openair.v1.DaemonTrustResponse.level:type_name -> openair.v1.TrustLevel
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	32, // 6: openair.v1.DaemonClipboardRequest.push:type_name -> openair.v1.ClipboardPush
+	30, // 7: openair.v1.DaemonUnlockResponse.protection_tier:type_name -> openair.v1.ProtectionTier
+	31, // 8: openair.v1.DaemonTrustRequest.level:type_name -> openair.v1.TrustLevel
+	31, // 9: openair.v1.DaemonTrustResponse.level:type_name -> openair.v1.TrustLevel
+	33, // 10: openair.v1.DaemonBrowseResponse.entries:type_name -> openair.v1.FileStat
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_openair_v1_daemon_proto_init() }
@@ -2204,6 +2559,7 @@ func file_openair_v1_daemon_proto_init() {
 		return
 	}
 	file_openair_v1_clipboard_proto_init()
+	file_openair_v1_remotefs_proto_init()
 	file_openair_v1_common_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2211,7 +2567,7 @@ func file_openair_v1_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_openair_v1_daemon_proto_rawDesc), len(file_openair_v1_daemon_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   23,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

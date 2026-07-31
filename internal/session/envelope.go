@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/apernet/quic-go"
 )
 
 // EnvelopeVersion is the envelope version this implementation speaks.
@@ -31,6 +33,13 @@ const (
 	CodeCapabilityUnavailable ErrorCode = 0x09
 	CodeResourceExhausted     ErrorCode = 0x0a
 	CodeIntegrityFailure      ErrorCode = 0x0b
+
+	// CodeNotFound is a path the source does not have. §10 has no such code,
+	// which is a gap rather than a choice: remotefs (§11) can only report a
+	// failure as a stream reset, and without this the commonest outcome a file
+	// browser produces -- "that path is not there" -- would be indistinguishable
+	// from REJECTED, which means a human declined (D-73).
+	CodeNotFound ErrorCode = 0x0c
 )
 
 var errorCodeNames = map[ErrorCode]string{
@@ -46,6 +55,7 @@ var errorCodeNames = map[ErrorCode]string{
 	CodeCapabilityUnavailable: "CAPABILITY_UNAVAILABLE",
 	CodeResourceExhausted:     "RESOURCE_EXHAUSTED",
 	CodeIntegrityFailure:      "INTEGRITY_FAILURE",
+	CodeNotFound:              "NOT_FOUND",
 }
 
 func (c ErrorCode) String() string {
@@ -181,4 +191,23 @@ func DecodeEnvelope(r io.Reader) (Envelope, error) {
 		return Envelope{}, err
 	}
 	return e, nil
+}
+
+// StreamErrorCode reports the PROTOCOL.md §10 code a peer used to reset a
+// stream, if the error came from one.
+//
+// A capability that opens a stream per request -- remotefs (§11) is the first
+// -- learns why the far end refused only from the reset code. Without this the
+// caller sees quic-go's own error string and has to parse prose to tell "you
+// are not allowed" from "that file does not exist".
+func StreamErrorCode(err error) (ErrorCode, bool) {
+	var se *quic.StreamError
+	if errors.As(err, &se) {
+		return ErrorCode(se.ErrorCode), true
+	}
+	// A capability is written against session.Stream and may be running over
+	// something that is not QUIC -- an in-memory pipe in a test, the local IPC
+	// link. Those carry the code as a ProtocolError instead, and a caller
+	// should not have to know which transport it is on to read a refusal.
+	return ErrorCodeOf(err)
 }

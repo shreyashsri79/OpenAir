@@ -557,6 +557,37 @@ func (s *sess) serveStream(st Stream) {
 		return
 	}
 
+	// §6 on a stream: an Owned-level capability sends its AuthProof as the
+	// first frame of the stream it authorises, because a proof on the control
+	// stream is not ordered against a stream opened after it (D-57, D-71). The
+	// proof joins the same pending set the control path uses and is spent by
+	// the operation that follows it here.
+	if env.CapID == 0 && env.MsgType == MsgAuthProof {
+		if err := s.auth.receive(env.Payload); err != nil {
+			code, ok := ErrorCodeOf(err)
+			if !ok {
+				code = CodeUnauthorised
+			}
+			st.Reset(uint32(code))
+			return
+		}
+		env, err = DecodeEnvelope(st)
+		if err != nil {
+			code, ok := ErrorCodeOf(err)
+			if !ok {
+				code = CodeProtocolViolation
+			}
+			st.Reset(uint32(code))
+			return
+		}
+		if env.CapID == 0 {
+			// A proof authorises a capability operation. Another proof, or any
+			// other control message, is not one.
+			st.Reset(uint32(CodeProtocolViolation))
+			return
+		}
+	}
+
 	s.mu.RLock()
 	_, negotiated := s.caps[env.CapID]
 	s.mu.RUnlock()
@@ -568,12 +599,6 @@ func (s *sess) serveStream(st Stream) {
 		st.Reset(uint32(CodeCapabilityUnavailable))
 		return
 	}
-	// The same §6 gate as the control path. One caveat, stated rather than
-	// hidden: a proof arriving on the control stream and a capability stream
-	// opened straight after are not ordered against each other by QUIC, so an
-	// Owned-level *stream* opener can race its own proof. No Phase 1 capability
-	// declares Owned, so nothing exercises it; a capability that does will need
-	// its proof on the stream itself (D-57).
 	owned, allowed := s.authorizeInbound(h, env.CapID, env.MsgType)
 	if !allowed {
 		st.Reset(uint32(CodeUnauthorised))
@@ -584,9 +609,17 @@ func (s *sess) serveStream(st Stream) {
 			st.Reset(uint32(CodeCapabilityUnavailable))
 			return
 		}
+		// A capability that names a §10 code has said something the peer can
+		// act on -- UNAUTHORISED means "ask for access", NOT_FOUND means "that
+		// path is not there". Flattening those to RESOURCE_EXHAUSTED would
+		// leave every failure looking like the source was overloaded.
+		code, ok := ErrorCodeOf(err)
+		if !ok {
+			code = CodeResourceExhausted
+		}
 		s.log.Warn("capability stream handler failed",
-			"capID", env.CapID, "msgType", env.MsgType, "err", err)
-		st.Reset(uint32(CodeResourceExhausted))
+			"capID", env.CapID, "msgType", env.MsgType, "code", code.String(), "err", err)
+		st.Reset(uint32(code))
 	}
 }
 

@@ -96,6 +96,10 @@ func (d *Daemon) handle(ctx context.Context, c *client, msgType uint16, payload 
 		d.onLock(c, payload)
 	case ipc.MsgTrustRequest:
 		d.onTrust(c, payload)
+	case ipc.MsgBrowseRequest:
+		d.onBrowse(ctx, c, payload)
+	case ipc.MsgFetchRequest:
+		d.onFetch(ctx, c, payload)
 	default:
 		d.cfg.Logf("ipc: ignoring unknown message type %d", msgType)
 	}

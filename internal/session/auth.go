@@ -239,6 +239,22 @@ func (s *sess) authorizeInbound(h Handler, capID byte, msgType uint16) (owned bo
 	haveRecord := s.haveRecord
 	s.mu.RUnlock()
 
+	// The trust level is re-read per message rather than taken from the record
+	// Hello populated. A level is state on *this* device, and the local user
+	// changes it while sessions are open: §6.4's grant, and §6.1's revocation,
+	// which is explicitly required to land on a session already running. A
+	// cached level makes a promotion need a reconnect to take effect and -- the
+	// half that matters -- leaves a demoted peer at its old level until one
+	// happens (D-74).
+	if s.cfg.PeerLookup != nil && peer.DeviceID != "" {
+		if current, ok := s.cfg.PeerLookup(peer.DeviceID); ok {
+			peer.Level = current.Level
+			peer.PrivilegePublicKey = current.PrivilegePublicKey
+			peer.GrantedCapabilities = current.GrantedCapabilities
+			haveRecord = true
+		}
+	}
+
 	owned, code, reason := s.auth.consume(peer.PrivilegePublicKey, capID, msgType)
 	if code != 0 {
 		s.authEvent(AuthEvent{
@@ -371,5 +387,83 @@ func SendOwnedIfUnlocked(ctx context.Context, sess Session, capID byte, msgType 
 		return false, sess.Send(ctx, capID, msgType, msg)
 	default:
 		return false, err
+	}
+}
+
+// OpenOwnedStream opens a capability stream whose first frame is an AuthProof
+// for the operation about to be written on it (§6).
+//
+// D-57 named the hazard this closes. A proof sent on the control stream and a
+// capability stream opened straight after are not ordered against each other by
+// QUIC, so an Owned-level stream opener races its own authorisation: sometimes
+// the proof arrives first and the operation is allowed, sometimes it does not
+// and the same operation is refused. No Phase 1 capability declared Owned, so
+// nothing exercised it; remotefs (§11, capID 3) does, and this is the answer --
+// the proof travels on the stream it authorises, where QUIC's own ordering
+// guarantees it arrives first.
+//
+// The caller writes the operation's own envelope next, with the same capID and
+// msgType the proof was signed over. Anything else fails to verify.
+func (s *sess) OpenOwnedStream(ctx context.Context, capID byte, msgType uint16) (Stream, error) {
+	peer := s.Peer()
+	nonce, issuedAt, sig, err := s.cfg.Local.SignOwned(peer.DeviceID, capID, msgType)
+	if err != nil {
+		return nil, err
+	}
+	proofPayload, err := proto.Marshal(&v1.AuthProof{Nonce: nonce, IssuedAt: issuedAt, Signature: sig})
+	if err != nil {
+		return nil, err
+	}
+
+	st, err := s.OpenStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// No write lock: this stream belongs to this caller and nothing else writes
+	// to it, which is the whole reason the race D-57 describes does not exist
+	// here.
+	if err := EncodeEnvelope(st, Envelope{
+		Version: EnvelopeVersion,
+		CapID:   0,
+		MsgType: MsgAuthProof,
+		Payload: proofPayload,
+	}); err != nil {
+		st.Reset(uint32(CodeProtocolViolation))
+		return nil, err
+	}
+	return st, nil
+}
+
+// OwnedStreamOpener is OpenOwnedStream as an optional interface, for the same
+// reason OwnedSender is one: Session is a seam this package does not widen
+// unilaterally.
+type OwnedStreamOpener interface {
+	OpenOwnedStream(ctx context.Context, capID byte, msgType uint16) (Stream, error)
+}
+
+var _ OwnedStreamOpener = (*sess)(nil)
+
+// OpenOwnedStreamIfUnlocked opens a proven stream when this device holds a live
+// unlock for the peer, and a plain one when it does not.
+//
+// The plain stream is not a fallback that works: a capability requiring Owned
+// will have it refused at the far end. It is the right shape anyway, because
+// the refusal belongs to the peer that holds the policy -- and the caller is
+// told which kind it got, so a UI can say "unlock first" instead of reporting
+// a bare UNAUTHORISED.
+func OpenOwnedStreamIfUnlocked(ctx context.Context, sess Session, capID byte, msgType uint16) (st Stream, owned bool, err error) {
+	opener, ok := sess.(OwnedStreamOpener)
+	if !ok {
+		st, err = sess.OpenStream(ctx)
+		return st, false, err
+	}
+	switch st, err := opener.OpenOwnedStream(ctx, capID, msgType); {
+	case err == nil:
+		return st, true, nil
+	case errors.Is(err, identity.ErrLocked), errors.Is(err, identity.ErrNoPrivilegeKey):
+		st, err := sess.OpenStream(ctx)
+		return st, false, err
+	default:
+		return nil, false, err
 	}
 }

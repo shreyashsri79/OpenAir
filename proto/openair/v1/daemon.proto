@@ -3,6 +3,7 @@ syntax = "proto3";
 package openair.v1;
 
 import "openair/v1/clipboard.proto";
+import "openair/v1/remotefs.proto";
 import "openair/v1/common.proto";
 
 option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
@@ -42,6 +43,10 @@ enum DaemonMessageType {
   DAEMON_MESSAGE_TYPE_LOCK_RESPONSE = 20;
   DAEMON_MESSAGE_TYPE_TRUST_REQUEST = 21;
   DAEMON_MESSAGE_TYPE_TRUST_RESPONSE = 22;
+  DAEMON_MESSAGE_TYPE_BROWSE_REQUEST = 23;
+  DAEMON_MESSAGE_TYPE_BROWSE_RESPONSE = 24;
+  DAEMON_MESSAGE_TYPE_FETCH_REQUEST = 25;
+  DAEMON_MESSAGE_TYPE_FETCH_RESPONSE = 26;
 }
 
 // DaemonStatusRequest asks what the daemon is and what it is doing.
@@ -291,4 +296,45 @@ message DaemonError {
   uint64 request_id = 1;
   uint32 code = 2;
   string message = 3;
+}
+
+// DaemonBrowseRequest lists a paired device's shared files (M10, §11).
+//
+// The daemon holds the session and the unlock, so a shell asks for a path and
+// gets entries back; the range reads and the Owned proof happen on the other
+// side of this socket.
+message DaemonBrowseRequest {
+  uint64 request_id = 1;
+  string device = 2;  // name, DeviceID or prefix, as everywhere else
+  string path = 3;    // empty lists what that device shares
+  uint32 offset = 4;
+  uint32 limit = 5;
+}
+
+message DaemonBrowseResponse {
+  uint64 request_id = 1;
+  repeated FileStat entries = 2;
+  bool truncated = 3;  // more remain; ask again at offset + len(entries)
+  string error = 4;
+}
+
+// DaemonFetchRequest copies a remote file, or part of one, to a local path.
+//
+// It is remotefs rather than files: the source serves byte ranges and never
+// knows it served a whole file, which is what lets the same primitive back a
+// media player seeking in a 40 GB file (§11.2, PRD R16).
+message DaemonFetchRequest {
+  uint64 request_id = 1;
+  string device = 2;
+  string path = 3;
+  string dest = 4;    // local path to write
+  uint64 offset = 5;
+  uint64 length = 6;  // 0 means "to the end of the file"
+}
+
+message DaemonFetchResponse {
+  uint64 request_id = 1;
+  uint64 bytes_written = 2;
+  string dest = 3;
+  string error = 4;
 }

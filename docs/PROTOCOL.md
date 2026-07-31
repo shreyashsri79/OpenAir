@@ -624,6 +624,7 @@ Carried in QUIC `CONNECTION_CLOSE` (connection-fatal) or `STOP_SENDING` /
 | 0x09 | `CAPABILITY_UNAVAILABLE` | operation | Not negotiated, or disabled |
 | 0x0a | `RESOURCE_EXHAUSTED` | operation | Out of disk, memory, or stream budget |
 | 0x0b | `INTEGRITY_FAILURE` | operation | Chunk digest mismatch |
+| 0x0c | `NOT_FOUND` | operation | The named path does not exist on the source (D-73) |
 
 `KEY_MISMATCH` MUST NOT be retried automatically. It means either a re-installed
 peer or an attack, and the two are indistinguishable to the protocol.
@@ -666,6 +667,23 @@ Listing is paginated because a directory of 100k entries must not become a
 request escaping them MUST be refused with `UNAUTHORISED`, applying the same
 traversal rules as §8.1.
 
+**Path form.** A path is `root/sub/path`: the first component names one of the
+source's configured roots, the rest is relative to it, separators are always
+forward slashes. The empty path is the list of roots themselves — without it a
+client cannot discover what it may browse and would have to be told the share
+names out of band, which for a browsing capability is an odd hole (D-72).
+
+**Authorisation.** remotefs is Owned-level. Reading a device's files while
+nobody is watching it is the operation §6 exists for, so every request carries
+an `AuthProof`. Because each request is its own stream, the proof is the first
+frame *of that stream* rather than a control-stream message: a proof on the
+control stream is not ordered against a stream opened after it, so the same
+request would sometimes be allowed and sometimes refused (D-57, D-71).
+
+A path that does not exist is `NOT_FOUND` (§10). `REJECTED` means a human
+declined, which is a different thing and sends a user looking for a prompt
+nobody saw (D-73).
+
 ### 11.2 Range reads
 
 The client opens a stream, sends one `ReadRequest`, and the source replies with
@@ -692,6 +710,12 @@ message ThumbResponse { string mime = 1; bytes image = 2; }
 
 Generated on the source, so browsing a folder of RAW photos does not transfer
 them. Sources SHOULD cache thumbnails and MUST bound generation work.
+
+The bound has to be on the *source image*, not on time: a decoder handed a
+60000×60000 PNG allocates before it reaches anything a deadline could
+interrupt. This implementation reads the dimensions from the header, refuses
+past 40 megapixels with `RESOURCE_EXHAUSTED`, and only then decodes. `mime` in
+the response is whatever the source chose to render; ours is `image/jpeg`.
 
 ### 11.4 Client-side behaviour (non-normative but load-bearing)
 

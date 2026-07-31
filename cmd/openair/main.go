@@ -47,6 +47,8 @@ usage:
   openair recv [--listen ADDR] [--dir DIR] [--keys DIR] [--yes] [--no-announce]
   openair send [--keys DIR] FILE... DEVICE|ADDR
   openair clip push DEVICE|ADDR [TEXT]
+  openair ls DEVICE [PATH] [-l] [--all] [--socket PATH]
+  openair get DEVICE PATH [--out FILE] [--offset N] [--length N]
   openair protect [--keys DIR]
   openair unlock DEVICE [--for DURATION] [--never-expire] [--socket PATH]
   openair lock [DEVICE] [--socket PATH]
@@ -61,6 +63,8 @@ commands:
   recv      listen for an inbound transfer and write it to --dir
   send      offer FILE... to a device, named or at an explicit host:port
   clip      push this machine's clipboard, or the text you give, to a device
+  ls        list what another device shares, without transferring anything
+  get       copy a remote file, or a byte range of one, to this machine
   protect   create this device's privilege key, sealed with a passphrase
   unlock    start a six-hour owned session for one device
   lock      end an owned session now, or all of them
@@ -115,6 +119,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runSend(args[1:], stdin, stdout)
 	case "clip":
 		return runClip(args[1:], stdin, stdout)
+	case "ls":
+		return runLs(args[1:], stdout)
+	case "get":
+		return runGet(args[1:], stdout)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return nil
