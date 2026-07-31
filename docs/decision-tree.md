@@ -43,9 +43,21 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-31 | ADR-5 | Does gomobile actually bind quic-go? | **accepted** — yes, 8.4 MB/ABI |
 | D-32 | ADR-8 | When is the Windows work done? | **accepted** — deferred to Phase 2 |
 | D-33 | ADR-8 | What does Windows actually cost? | evidence — 1450 Mb/s at 1 stream, 647 at 4 |
-| D-34 | — | Are the wire schemas implementable? | **accepted** — 11 protos; found 6 spec defects |
+| D-34 | — | Are the wire schemas implementable? | **accepted** — 11 protos; found 6 spec defects · corrected on enums by D-39 |
+| D-35 | ADR-7 sub | How is the BBR dependency actually obtained? | **accepted** — pseudo-version fork + vendored BBR · corrects D-16 |
+| D-36 | ADR-7 sub | Which BBR gain profile is the default? | **accepted** — conservative, latency-first |
+| D-37 | — | What authorises an inbound peer? | **accepted** — `Config.Authorize` callback |
+| D-38 | — | Which error code closes an unknown envelope version? | **accepted** — `PROTOCOL_VIOLATION`; §3/§10 disagree |
+| D-39 | — | Which enums are offset by one? | **accepted** — not `msgType`, not `ProtectionTier` |
+| D-40 | — | What is a chunk offset relative to? | **accepted** — transfer-global, files concatenated |
+| D-41 | — | How does the session dispatch to capabilities? | **accepted** — bounded queue per capability |
+| D-42 | ADR-3 | Where is the privilege *public* key while sealed? | accepted — interim sidecar, pending Appendix A v2 |
+| D-43 | — | Is there a threat model? | accepted — document done; 4 questions open |
+| D-44 | — | What does CI enforce? | **accepted** — build/vet/test/Windows/buf; netem manual |
 
-**Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; what remains is comparing BBRv1 against D-17's Cubic baseline once the port lands.
+**Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; the port has now landed (D-35, D-36), so what remains is comparing BBRv1 against D-17's Cubic baseline.
+
+**Raised by wave 1, needing the maintainer rather than an agent.** Four security questions from the threat model (D-43): the D-20/D-21 conflict over whether a TPM-sealed key survives cold theft, the trust store's unspecified at-rest integrity, `RelayAuth`'s missing domain separation, and DeviceID as a permanent tracking identifier. Separately, `PROTOCOL.md` needs four edits that wave 1 found and worked around rather than fixed: §8.3's chunk-offset semantics (D-40, the urgent one — it is wire-visible and two implementations choosing differently will corrupt files), §3 versus §10 on unknown versions (D-38), §3's claim that every enum is offset (D-39), and Appendix A gaining a public-key field (D-42). Two interface gaps are also outstanding: `identity.Identity` does not declare `ProtectionTier()` though Hello carries one, and `session.Handler` has no version accessor, which leaves §4's per-capability version negotiation degenerate.
 
 ## Transport — the deep branch
 
@@ -736,3 +748,116 @@ Defects found by compiling, all corrected in the same commit:
 Consequences: `buf breaking` can now run against the previous commit in CI, which is what mechanically enforces PRD R32's mixed-version compatibility — the ignore-unknown rules in section 3.1 are designed to survive additive change, and `buf` catches the non-additive kind before it ships. Golden vectors for the 8-byte envelope (HLD section 5) are still outstanding; the round-trip test covers the protobuf types only. `mirror.proto` carries a provisional marker matching section 14, pending D-9.
 
 Worth recording for its own sake: every one of the six defects is the kind that survives any amount of proof-reading and dies immediately on contact with a compiler. Spec-first (HLD principle 4) only pays if "the spec" is something a machine can check.
+
+## D-35: The apernet fork is a pseudo-version, and hysteria's BBR must be vendored — corrects D-16
+Date: 2026-07-31
+Status: accepted (corrects D-16)
+Context: D-16 chose BBR from the apernet quic-go fork and stated the plan mechanically: "the dependency therefore becomes apernet/quic-go plus hysteria's BBR", with congestion control installed on a live connection through the fork's exported `congestion` package. Wave 1's X1 was the first attempt to actually resolve those two modules, and neither resolved the way the entry describes.
+Decision: Depend on `github.com/apernet/quic-go` at **pseudo-version `v0.60.1-0.20260618182935-599b15a1fa26`**, and **vendor** hysteria's BBR into `internal/congestion/{bbr,common}` rather than importing it.
+
+Two discoveries forced this, both mechanical rather than matters of taste:
+
+1. **Hysteria's BBR cannot be imported.** It lives at `core/v2/`**`internal`**`/congestion/bbr`. Go's internal-package rule makes that unreachable from any module outside `core/v2`, and there is no exported alias. The dependency D-16 describes does not exist; the choice is to copy the code or not to use it.
+2. **The fork's release tags are unusable under the fork's own import path.** apernet publish tags mirroring upstream (`v0.61.0` and so on) whose `go.mod` still reads `module github.com/quic-go/quic-go`, so requiring one under `github.com/apernet/quic-go` fails outright. Only their branch head declares the apernet module path, and only it carries the exported `congestion/` and `monotime/` packages. The pseudo-version *is* the release. Hysteria v2.10.0 pins the same commit.
+
+What D-16 got right survives intact and is the reason this is cheap: `(*quic.Conn).SetCongestionControl` is public API on the fork, so BBR is installed on a live connection with no patch against quic-go's `internal/`. D-14's vendoring cost — re-merging a local patch on every upstream security release — remains avoided.
+
+Alternatives considered: *Reimplement BBR* — rejected, this is precisely the subtle-correctness work the build plan forbids delegating and would be worse done twice. *Import upstream quic-go and give up BBR* — rejected, it discards D-14 and D-16 entirely. *`replace github.com/quic-go/quic-go => github.com/apernet/quic-go v0.61.0`* — tried first, and it fails: the tagged tree has no `congestion/` package to install through, so the replace directive buys a fork with none of the reason for wanting one.
+
+Consequences: `internal/congestion/PROVENANCE.md` records the upstream, the version, the exact two local modifications (one import path, one debug environment variable) and the re-sync procedure, so that updating stays a diff rather than an archaeology exercise. Upstream's own `bbr_sender_test.go` is kept and passes, which is the check that the port is faithful. `golang.org/x/exp` enters the module for this vendored code alone. The maintenance risk D-16 named is now sharper rather than softer: the project tracks a branch head, not a tag, and anyone bumping it must confirm `congestion/` still exists in the target before doing so. A fork that stops exporting it silently removes the ability to install any congestion controller at all.
+
+## D-36: BBR runs the conservative gain profile by default
+Date: 2026-07-31
+Status: accepted
+Context: D-16 identified BBRv1's standing queue — roughly 2×BDP inflight, plus ProbeRTT dips — as the one v1 defect that genuinely bites this architecture, because D-14 keeps bulk, clipboard, input and eventually `mirror` datagrams on a single connection sharing a single congestion controller and pacer. It named the mitigation as "a knob rather than a rewrite: one constructor using `highGain: 2.25` against the `2.885` default". Vendoring the sender (D-35) made that knob available as a named profile.
+Decision: `internal/congestion.DefaultProfile` is `bbr.ProfileConservative` — `highGain` 2.25, `highCwndGain` 1.75, drain-to-target and overshoot detection on — and `congestion.Use` installs it. Both `conn.Dialer.DialAddr` and `conn.Listener.Accept` call it once the handshake completes, which are the only two places a connection is established.
+
+Alternatives considered: *`ProfileStandard`, upstream's default* — rejected as the default because it optimises the quantity this architecture can most afford to lose. *`ProfileAggressive`* — rejected outright; it raises `highGain` to 3.0 on a connection that also carries keystrokes. *Per-capability tuning* — not possible, and that is the point: one connection means one controller, which is why the default matters so much.
+
+Consequences: peak bulk throughput is traded for a shorter bottleneck queue. That is the right side of the trade because HLD's sub-50 ms glass-to-glass target and its requirement that input never queue behind bulk are far harder to recover than the throughput given up, and D-17 already showed the shared connection beating separate connections for interactive latency by a factor of seven. `TestDefaultProfileIsLatencyFirst` fails deliberately if the constant is flipped back, because a silent reversion would show up only as latency regressing under load — the exact failure mode D-16 warned about. The profile is a parameter, so a future bulk-only path with no interactive traffic may pass `ProfileStandard` explicitly. D-17's Cubic baseline is still the number BBRv1 must be measured against; that comparison remains outstanding.
+
+## D-37: Inbound peers are authorised by an explicit callback on the session
+Date: 2026-07-31
+Status: accepted
+Context: M1a reported, and inspection confirmed, that nothing authorised an inbound peer. `session.New` compares the peer's TLS key against `Config.Peer`, but that check only fires when `Peer` is populated — which the dialling side can do and a listener structurally cannot, because it does not know who is calling until Hello arrives. `conn/listener.go` carried a comment saying authorisation "happens inside `session.New`"; `session.Config`'s own comment said `New` "leaves authorisation to the caller". Two comments claiming the opposite thing, and between them a listener that admitted every caller unconditionally.
+Decision: `session.Config` gains `Authorize func(identity.Peer) error`, invoked once Hello has populated the peer record — DeviceID and identity key derived from the TLS certificate, display name and protection tier as claimed — and **before** `startQueues` makes capability dispatch possible. Returning an error closes the session. `conn.Listen` takes the callback and passes it through.
+
+A nil `Authorize` admits any peer. That is deliberate and it is correct only for M1, whose scope is an explicit-address dial with the fingerprint shown and accepted interactively. M2 replaces the callback body with a trust-store lookup, at which point nil must stop being acceptable on the listening path.
+
+Alternatives considered: *Give `session.Config` a `TrustStore`* — rejected for M1, which has no trust store to consult and would have to stub one; it also pushes a policy decision into the layer that should only enforce it. *Authorise in `conn` after `New` returns* — rejected, because by then the control loop is running and a capability message may already have been dispatched. The gate has to be inside the handshake, not after it.
+
+Consequences: the hole is now a named, typed thing that a reader can find, rather than an accident living in the gap between two contradictory comments. Two regression tests over real QUIC assert that a rejecting callback yields no session and that the callback sees the peer's real DeviceID — derived from the TLS key, not taken from Hello, so a lying peer cannot influence what the gate is shown. This is a Phase 1 seam: M2 changes the callback's body, not its shape.
+
+## D-38: An unknown envelope version closes with PROTOCOL_VIOLATION — PROTOCOL.md §3 and §10 disagree
+Date: 2026-07-31
+Status: accepted (records a defect in PROTOCOL.md; the spec still needs the edit)
+Context: §3 states that a receiver seeing an unknown `ver` MUST close the connection with `PROTOCOL_VIOLATION` (0x01). §10's error table defines `0x02 UNKNOWN_VERSION`, "Unsupported envelope version" — a code whose only possible trigger is the condition §3 has just assigned to a different code. Two wave-1 workers hit this independently, from opposite directions: M1a implementing the decoder, and X4 deriving golden vectors by hand from §3. Both resolved it identically without conferring.
+Decision: follow §3's literal text. An unknown `ver` produces `CodeProtocolViolation`. `UNKNOWN_VERSION` remains defined but unreachable. The golden vectors pin this behaviour, so implementation and vectors agree.
+
+Alternatives considered: *Follow §10 and use `UNKNOWN_VERSION`* — the more specific code and arguably the better design, but §3 is the section that actually specifies decoder behaviour and it is unambiguous. Changing behaviour to match a table entry would mean shipping something the normative prose forbids.
+
+Consequences: **`PROTOCOL.md` still needs an edit** — either §3 names `UNKNOWN_VERSION`, or §10 deletes it as unreachable. Until then the spec contradicts itself and the next implementer will hit this a third time. The code and the vectors are consistent today, so an edit is not urgent, but it is real. Worth noting that hand-derived golden vectors caught this: it is the argument for X4's discipline of deriving expected bytes from prose rather than from the implementation.
+
+## D-39: Not every enum is offset by one, and ProtectionTier's two scales run in opposite directions — corrects D-34
+Date: 2026-07-31
+Status: accepted (corrects D-34)
+Context: D-34 established that proto3 reserves 0, so wire values differ from generated enum values, and stated the rule as "every enum in the schemas is offset by one". §3 repeats it. Implementing the conversions showed the rule is wrong in both directions, and the second case is a live hazard rather than a documentation nit.
+Decision: record the two exceptions explicitly, and convert through a table in every case rather than reasoning about offsets.
+
+1. **`msgType` is not offset.** PROTOCOL.md never enumerated message types — that was D-34's own defect 1 — so the schemas are the original definition and the generated enum value *is* the wire value. §3's prose reads as though the offset covers `msgType`; the sentence that follows lists only capID, `TrustLevel`, `ProtectionTier`, `ConsentScope` and `PathClass`. The truth is currently inferable only from an absence in a list, which is how the next person gets it wrong.
+2. **`ProtectionTier` is not offset either, and its two scales are inverted.** §7.3 numbers the tiers 1/2/3 and the schema matches, so there is no offset. But `identity.ProtectionTier` numbers them 0/1/2 **in the opposite order**, with `TierNone` first. A cast rather than a conversion therefore turns keystore-backed into none — it silently downgrades a TPM-protected peer to "unprotected", which is exactly the direction that matters, since D-21 forbids granting Owned to a tier-none device.
+
+Consequences: `internal/session/convert.go` holds every wire↔domain conversion in one file, and `TestProtectionTierIsNotOffset` fails deliberately if the two scales ever coincidentally line up — a test that exists to break when the hazard stops being visible. **`PROTOCOL.md` §3 needs an edit** stating plainly that `msgType` is not offset, rather than leaving it to be inferred. D-34's blanket phrasing should be read as superseded on this point.
+
+## D-40: A chunk offset is transfer-global across the offered files concatenated in offer order
+Date: 2026-07-31
+Status: accepted (records a gap in PROTOCOL.md §8.3; the spec needs the amendment)
+Context: §8.3's chunk frame is `offset(u64) + size(u32)` with no file identifier, while §8.1 offers `repeated FileMeta`. Nothing in the spec says what `offset` is relative to, so a multi-file transfer is unaddressable as specified. In parallel, `ChunkManifest.chunk_sha256` and `TransferAccept.have_chunks` are both indexed by a "chunk index" the spec never defines.
+Decision: `offset` is a **transfer-global offset into the offered files concatenated in offer order**, and **a chunk never spans a file boundary** — so the last chunk of each file is short, and chunk index maps to exactly one file. This resolves the manifest and resume indexing at the same time, because a chunk index is now unambiguous.
+
+Alternatives considered: *Add a file index to the frame header* — the cleaner design, but it changes a 12-byte header inherited byte-for-byte from v1.0 (D-4) and would cost a wire break for something the concatenation model already solves. *Let chunks span file boundaries* — rejected: it makes a chunk index correspond to a byte range in two files, which breaks per-chunk verification and makes resume state far harder to reason about.
+
+Consequences: **this is wire-visible and any other implementation must match it, so `PROTOCOL.md` §8.3 needs the amendment.** It is the highest-priority spec edit out of wave 1, because unlike D-38 and D-39 it is not a documentation clarification — two implementations that choose differently will corrupt files rather than fail to connect. Short trailing chunks are now normal rather than exceptional, which the plan and its coverage test account for.
+
+## D-41: The session dispatches inbound messages through one bounded queue per capability
+Date: 2026-07-31
+Status: accepted
+Context: the control loop reads envelopes off a single stream and must hand them to capabilities. How it does so determines whether a capability can perform a request/response round trip, whether message ordering survives, and what happens when a capability stops keeping up.
+Decision: one goroutine and one bounded channel (depth 64) per negotiated capID.
+
+Alternatives considered: *Synchronous dispatch on the read loop* — rejected, it deadlocks any capability that sends a message and waits for the reply, because the reply cannot be read while the handler is still on the stack. *One goroutine per message* — rejected, it loses ordering, which offer/cancel sequences depend on: a cancel overtaking its offer is a transfer that never stops.
+
+Consequences: a wedged capability eventually fills its queue and blocks the control loop for every capability, at depth 64. That was taken as the honest failure mode over the alternative of dropping messages, which would turn a stalled capability into silent protocol corruption elsewhere. It does mean one badly-behaved capability can stall a session, so this bound is worth revisiting when a capability with genuinely bursty control traffic exists — `mirror` is the likely first.
+
+## D-42: The privilege public key lives in a sidecar file until Appendix A carries it
+Date: 2026-07-31
+Status: accepted (interim; records a defect in PROTOCOL.md Appendix A)
+Context: a device must know its own privilege **public** key while the private half stays sealed — §5.2 sends it during pairing and the UI displays it. Appendix A's at-rest container has no field for it. As specified, obtaining the public key requires unsealing the private one, which contradicts D-20's premise that a locked device stays useful and reachable.
+Decision: store it in a sibling `privilege.pub` file, and cross-check it against the sealed key on every unseal so that substituting the sidecar is detected rather than trusted.
+
+Consequences: the sidecar is unauthenticated on its own, which is why the cross-check exists — but the check only runs at unseal time, so a substituted sidecar is caught late rather than never. The proper fix is an **Appendix A version 2 carrying `public_key` (32 bytes) inside the authenticated header**, which removes the sidecar and the unauthenticated-file problem together, and that edit is recommended before M6 builds the unlock flow on top of this container. Two smaller Appendix A gaps found alongside it: it specifies no integer endianness (it is labelled "normative, not wire", so §0's little-endian rule arguably does not reach it — §0 was applied), and `ct_len` is redundant with the file length (both are validated to agree rather than either being trusted).
+
+## D-43: A threat model exists, and it records four unresolved security questions
+Date: 2026-07-31
+Status: accepted (the document); the questions inside it are open
+Context: PRD R29 asks for a threat model. The security reasoning existed but was scattered across the decision log and PROTOCOL.md, where no reader could evaluate it as a whole.
+Decision: `docs/threat-model.md` assembles it — assets, five trust boundaries, eight named adversaries, what rendezvous and relay operators each learn, accepted weaknesses, and non-goals cross-referenced to Appendix C. Every claim carries an inline section or decision citation. R29 is satisfied as a documentation requirement.
+
+The value is in what assembly exposed. Four items need a maintainer decision rather than a note:
+
+1. **D-20 and D-21 conflict.** D-21 claims tier 1 "closes the cold threat completely". D-20 has `auth_policy = never` devices auto-unsealing from TPM boot state with no human present. A PCR-only policy releases the key to whoever boots the stolen hardware — and that is the always-on desktop, the device holding the most valuable Owned access. Same shape as TPM-sealed disk encryption with no PIN.
+2. **The trust store has no specified at-rest integrity, anywhere.** Appendix A covers the privilege key only. Write access to the trust store file inserts an attacker's own public key as an Owned peer, or flips a level, or rewrites a protection tier — and every check in §6 and §7.3 then passes honestly. It is cheaper than attacking any cryptography above it. (M1b's trust store enforces two invariants at the storage layer — a record's DeviceID must derive from its own identity key, and `LevelOwned` is refused for a tier-none peer — which raises the cost but is not integrity protection.)
+3. **`RelayAuth` has no domain separation and no binding to the relay's identity** (§17). It signs over both nonces, unlike §5.2, §6 and §16, which all carry a prefix. A hostile relay can proxy another relay's challenge and claim the client's mailbox there. This is a straightforward spec defect with a straightforward fix.
+4. **DeviceID is a permanent tracking identifier.** mDNS broadcasts it in clear on every network joined (§15), `LookupRequest` is unauthenticated (§16), and it never rotates (§2). Composed, that is a stable identifier resolvable to a current IP by anyone on any LAN the device visits.
+
+Consequences: items 1 and 2 are maintainer calls, 3 is a PROTOCOL.md edit, 4 is a design question that becomes harder to change the longer DeviceID is load-bearing. Also recorded: D-18 says to store an Argon2id *hash* of the credential while D-19 and Appendix A derive `K_master` and verify via the AEAD tag. Appendix A is right, but D-18 was never superseded on the point, so a reader following the log in order builds the weaker thing — treat D-18 as superseded by D-19 on credential storage.
+
+## D-44: CI enforces the definition of done; the netem matrix stays manual
+Date: 2026-07-31
+Status: accepted
+Context: the build plan's definition of done names five conditions per milestone, three of them mechanical. Nothing enforced them.
+Decision: three workflows. `ci.yml` runs `gofmt -l`, then `go build`, `go vet`, `go test -race` and `GOOS=windows go build` across both Go modules (root and `oabench`, which have different Go versions and so are pinned per-module from their own `go.mod`). `buf.yml` runs `buf lint` and `buf breaking`. `netem.yml` is **`workflow_dispatch` only, not scheduled**.
+
+The netem decision is the considered one. `oabench/netem/lab.sh` uses `unshare -Urn` specifically to avoid needing root, but Ubuntu's AppArmor policy since 23.10 blocks unprivileged user-namespace creation by default, so it fails out of the box on `ubuntu-latest`. The sysctl workaround is included along with a preflight step that fails loudly if it did not work, but none of it can be verified without actually running on a hosted runner. A nightly job that is red every night trains everyone to ignore CI, which is worse than no job.
+
+Consequences: `GOOS=windows go build` is now enforced on every push, which is what D-32 needs to keep Windows from rotting silently while its milestone is deferred. Three gaps CI cannot close, recorded rather than papered over: the definition of done's first condition ("runs end to end, by hand, on two real endpoints") is hardware-in-the-loop and no job substitutes for it; `openair-gui` is a third module needing system GL/X11 packages and is currently ungated; and `buf generate` reproducibility — that committed `internal/wire/` still matches what codegen produces — is checked by nothing, though `git diff --exit-code` after a generate step would catch it.

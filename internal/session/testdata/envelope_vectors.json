@@ -1,0 +1,208 @@
+{
+  "_readme": [
+    "Golden vectors for the 8-byte envelope header defined in docs/PROTOCOL.md §3",
+    "(HLD §5 asks for these explicitly: 'goldens tested in CI'). Every byte in",
+    "'header_hex' and 'full_hex' below was derived by hand from §3's field layout",
+    "and §0's 'all integers are little-endian' rule -- NOT by running",
+    "EncodeEnvelope and recording its output. A vector produced that way can",
+    "never fail and defeats the purpose of this test (track X4).",
+    "",
+    "Header layout (§3): byte 0 = ver (u8), byte 1 = capID (u8), bytes 2-3 =",
+    "msgType (u16 LE), bytes 4-7 = length (u32 LE), followed by `length` bytes",
+    "of payload.",
+    "",
+    "D-34 offset rule, as actually applied (confirmed against",
+    "internal/session/convert.go and internal/wire/openair/v1/*.pb.go, which",
+    "landed concurrently with this track):",
+    "  - capID IS offset by one from the generated CapabilityId enum (wire 0 =",
+    "    control = enum 1; wire 1 = files = enum CAPABILITY_ID_FILES = 2; wire 2",
+    "    = clipboard = enum 3). PROTOCOL.md §3 states this explicitly for capID.",
+    "  - Per-capability msgType enums (ControlMessageType, FilesMessageType,",
+    "    ClipboardMessageType, ...) are NOT offset. The wire msgType equals the",
+    "    generated enum's raw int32 value directly. See the 'ambiguity' note",
+    "    below -- this is not actually stated anywhere in §3 itself, and had to",
+    "    be confirmed by reading the generated code.",
+    "",
+    "Ambiguity/defect notes found while deriving these vectors (worker report,",
+    "track X4, has the full writeup):",
+    "  1. §3's general sentence ('every enum in the schemas is offset by one')",
+    "     reads as if it covers msgType too, but the sentence that follows only",
+    "     lists capID, TrustLevel, ProtectionTier, ConsentScope and PathClass as",
+    "     offset fields -- msgType enums are conspicuously absent from that",
+    "     list. The generated code confirms the omission is deliberate:",
+    "     CapabilityId values carry a '// wire N' comment in common.pb.go;",
+    "     ControlMessageType/FilesMessageType/etc. carry no such comment, and",
+    "     internal/session/convert.go (M1a) states outright that msgType is 'NOT",
+    "     offset either' and that PROTOCOL.md 'never enumerated msgType at all'.",
+    "     §3 should say so explicitly instead of leaving it to be inferred from",
+    "     an absence in a list.",
+    "  2. §3 says an unknown `ver` closes the connection with",
+    "     `PROTOCOL_VIOLATION`. §10's error code table defines a separate,",
+    "     more specific code for exactly this condition: 0x02 UNKNOWN_VERSION,",
+    "     'Unsupported envelope version'. §3's prose and §10's table disagree",
+    "     about which code an unknown version maps to. internal/session/envelope.go",
+    "     (M1a) hit this independently and chose to follow §3's literal text",
+    "     (CodeProtocolViolation) with a comment flagging the inconsistency --",
+    "     this vector file follows the shipped implementation for that same",
+    "     reason (§3 is the more specific normative statement about this exact",
+    "     byte), but the inconsistency itself belongs in docs/decision-tree.md.",
+    "",
+    "File format: JSON manifest + hex-encoded byte strings, chosen so a human",
+    "can check 'header_hex' against the §3 diagram by hand without tooling.",
+    "The two 16-MiB-adjacent cases store a payload *pattern* description",
+    "instead of literal payload bytes (33MB of hex would make this file useless",
+    "to review); only the 8-byte header -- the part actually derived from the",
+    "spec -- is stored as a literal golden value for those cases."
+  ],
+  "protocol_version": 1,
+  "envelope_header_size": 8,
+  "max_message_size_bytes": 16777216,
+  "cases": [
+    {
+      "name": "control_hello",
+      "protocol_clause": "PROTOCOL.md §3 header diagram; Appendix B capID 0 = control ('0 is the session layer itself')",
+      "description": "A plain session-layer (control) message with a small nonempty payload. Baseline case: pins the general 8-byte header layout and field order (ver, capID, msgType LE, length LE) with no boundary conditions in play.",
+      "fields": {
+        "ver": 1,
+        "cap_id": 0,
+        "cap_id_note": "control capability, Appendix B wire value 0. Generated enum CapabilityId_CAPABILITY_ID_CONTROL = 1 (D-34: capID wire = enum - 1).",
+        "msg_type": 1,
+        "msg_type_note": "ControlMessageType_CONTROL_MESSAGE_TYPE_HELLO = 1 in internal/wire/openair/v1/session.pb.go. msgType wire value equals the raw generated enum int directly -- see ambiguity note 1 in _readme.",
+        "payload_hex": "010203"
+      },
+      "expect": {
+        "decode_ok": true,
+        "encode_ok": true,
+        "header_hex": "0100010003000000",
+        "full_hex": "0100010003000000010203"
+      }
+    },
+    {
+      "name": "files_capability_wire_offset",
+      "protocol_clause": "PROTOCOL.md §3: 'Wire values are not enum values... The capID byte for files is 0x01; CAPABILITY_ID_FILES is 2' (D-34)",
+      "description": "The D-34 pin: capID on the wire is 1 for files while the generated enum CAPABILITY_ID_FILES is 2. This is exactly the kind of regression this track exists to catch -- an encoder that casts the enum instead of converting it would write 0x02 here instead of 0x01.",
+      "fields": {
+        "ver": 1,
+        "cap_id": 1,
+        "cap_id_note": "files capability, Appendix B wire value 1. Confirmed against internal/wire/openair/v1/common.pb.go: CapabilityId_CAPABILITY_ID_FILES = 2 // wire 1.",
+        "msg_type": 1,
+        "msg_type_note": "FilesMessageType_FILES_MESSAGE_TYPE_TRANSFER_OFFER = 1 (raw, not offset -- see ambiguity note 1).",
+        "payload_hex": "cafebabe"
+      },
+      "expect": {
+        "decode_ok": true,
+        "encode_ok": true,
+        "header_hex": "0101010004000000",
+        "full_hex": "0101010004000000cafebabe"
+      }
+    },
+    {
+      "name": "empty_payload",
+      "protocol_clause": "PROTOCOL.md §3: 'length (u32) -- payload length'",
+      "description": "Zero-length payload. Pins that length=0 is a valid, non-error encoding -- the header is complete on its own and no payload bytes follow.",
+      "fields": {
+        "ver": 1,
+        "cap_id": 0,
+        "msg_type": 12,
+        "msg_type_note": "ControlMessageType_CONTROL_MESSAGE_TYPE_SESSION_END = 12.",
+        "payload_hex": ""
+      },
+      "expect": {
+        "decode_ok": true,
+        "encode_ok": true,
+        "header_hex": "01000c0000000000",
+        "full_hex": "01000c0000000000"
+      }
+    },
+    {
+      "name": "one_byte_payload",
+      "protocol_clause": "PROTOCOL.md §3: 'length (u32) -- payload length'",
+      "description": "Smallest nonzero payload (1 byte). Also exercises a second capID off-by-one instance (clipboard) alongside the files case.",
+      "fields": {
+        "ver": 1,
+        "cap_id": 2,
+        "cap_id_note": "clipboard capability, Appendix B wire value 2. Generated enum CapabilityId_CAPABILITY_ID_CLIPBOARD = 3 (D-34, second instance of the offset).",
+        "msg_type": 1,
+        "msg_type_note": "ClipboardMessageType_CLIPBOARD_MESSAGE_TYPE_PUSH = 1.",
+        "payload_hex": "7f"
+      },
+      "expect": {
+        "decode_ok": true,
+        "encode_ok": true,
+        "header_hex": "0102010001000000",
+        "full_hex": "01020100010000007f"
+      }
+    },
+    {
+      "name": "multibyte_msgtype_endianness",
+      "protocol_clause": "PROTOCOL.md §0: 'All integers are little-endian'; §3: 'msgType (u16)'",
+      "description": "msgType = 0x1234, a value with distinct high and low bytes so the header unambiguously shows byte order: little-endian serializes it as 34 12, not 12 34. This value is a synthetic probe, not a real generated enum -- every real per-capability msgType enum observed in internal/wire/openair/v1/*.pb.go is small (well under 256) and would not exercise the high byte on its own.",
+      "fields": {
+        "ver": 1,
+        "cap_id": 0,
+        "msg_type": 4660,
+        "msg_type_note": "0x1234 = 4660 decimal. Synthetic value chosen only to pin byte order, not tied to any real ControlMessageType.",
+        "payload_hex": "68656c6c6f"
+      },
+      "expect": {
+        "decode_ok": true,
+        "encode_ok": true,
+        "header_hex": "0100341205000000",
+        "full_hex": "010034120500000068656c6c6f"
+      }
+    },
+    {
+      "name": "boundary_max_message_size_exact",
+      "protocol_clause": "PROTOCOL.md §3: 'Receivers MUST reject length greater than 16 MiB'",
+      "description": "length is exactly MaxMessageSize (16777216 = 16 MiB). Read literally, §3 rejects lengths *greater than* the cap, so exactly-at-cap MUST be accepted, not rejected. Payload content itself pins nothing in §3 beyond 'payload is length bytes'; it is a repeating byte(i%256) pattern generated by the test rather than stored literally here, because 16 MiB of hex would make this file unreviewable by a human. The header_hex below -- the actual golden value, hand-derived from the u32 LE encoding of 16777216 -- is what this case exists to pin.",
+      "fields": {
+        "ver": 1,
+        "cap_id": 0,
+        "msg_type": 1,
+        "payload_length": 16777216,
+        "payload_pattern": "byte(i % 256) for i in [0, payload_length)"
+      },
+      "expect": {
+        "decode_ok": true,
+        "encode_ok": true,
+        "header_hex": "0100010000000001"
+      }
+    },
+    {
+      "name": "error_length_exceeds_max",
+      "protocol_clause": "PROTOCOL.md §3: 'Receivers MUST reject length greater than 16 MiB with MESSAGE_TOO_LARGE'",
+      "description": "length = MaxMessageSize + 1 (16777217), one past the cap. Decode input is the 8-byte header only, with no payload bytes following it -- a correct decoder must reject based on the length field alone, before attempting to read a body that large (also guards against a hostile peer using an oversized length to force a huge allocation/read).",
+      "fields": {
+        "ver": 1,
+        "cap_id": 0,
+        "msg_type": 1
+      },
+      "expect": {
+        "decode_ok": false,
+        "encode_ok": false,
+        "header_hex": "0100010001000001",
+        "error_code": "MESSAGE_TOO_LARGE",
+        "error_reason": "§3: 'Receivers MUST reject length greater than 16 MiB with MESSAGE_TOO_LARGE'; §10 code 0x03."
+      }
+    },
+    {
+      "name": "error_unknown_version",
+      "protocol_clause": "PROTOCOL.md §3: 'A receiver seeing an unknown ver MUST close the connection with PROTOCOL_VIOLATION'",
+      "description": "ver = 2 (PROTOCOL.md defines only version 1; 2 chosen arbitrarily to mean 'anything unknown'). Must be rejected regardless of the rest of the frame being otherwise well-formed.",
+      "fields": {
+        "ver": 2,
+        "cap_id": 0,
+        "msg_type": 1,
+        "payload_hex": "abcd"
+      },
+      "expect": {
+        "decode_ok": false,
+        "encode_ok": false,
+        "header_hex": "0200010002000000",
+        "full_hex": "0200010002000000abcd",
+        "error_code": "PROTOCOL_VIOLATION",
+        "error_reason": "§3's prose names PROTOCOL_VIOLATION for this condition, but §10's error code table defines a separate, more specific 0x02 UNKNOWN_VERSION ('Unsupported envelope version') that reads like it exists for exactly this case. §3 and §10 disagree about which code an unknown version maps to -- see ambiguity note 2 in _readme. This vector follows the shipped implementation (internal/session/envelope.go), which follows §3's literal text and flags the same inconsistency in a comment."
+      }
+    }
+  ]
+}

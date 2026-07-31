@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/apernet/quic-go"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/shreyashsri79/openair/internal/identity"
@@ -19,8 +20,14 @@ const MaxMessageSize = 16 << 20
 
 // Envelope is one framed control message.
 //
-// CapID and MsgType are WIRE values, not generated-enum values; the two differ
-// by one because proto3 reserves zero (D-34). Convert, never cast.
+// CapID is a WIRE value, not a generated-enum value; the two differ by one
+// because proto3 reserves zero (D-34). Convert with CapIDToWire /
+// CapIDFromWire, never cast.
+//
+// MsgType is the exception to that rule: PROTOCOL.md never enumerated msgType,
+// so the schemas' per-capability *MessageType enums are the original
+// definition and their values ARE the wire values, with 0/UNSPECIFIED simply
+// invalid. See convert.go.
 type Envelope struct {
 	Version byte
 	CapID   byte
@@ -28,10 +35,9 @@ type Envelope struct {
 	Payload []byte
 }
 
-// EncodeEnvelope and DecodeEnvelope are the framing boundary. Golden vectors
-// for these live in internal/session/testdata (HLD §5).
-func EncodeEnvelope(w io.Writer, e Envelope) error   { panic("M1a: unimplemented") }
-func DecodeEnvelope(r io.Reader) (Envelope, error)   { panic("M1a: unimplemented") }
+// EncodeEnvelope and DecodeEnvelope are the framing boundary; they live in
+// envelope.go. Golden vectors for them live in internal/session/testdata
+// (HLD §5).
 
 // Stream is one QUIC stream. Capabilities receive these; they never touch
 // quic-go directly, which is what keeps them path-agnostic (D-6).
@@ -67,4 +73,63 @@ type Session interface {
 	Quiesce(ctx context.Context, floorBytesPerSec uint32, reason string) (release func(), err error)
 
 	Close(code uint16, reason string) error
+}
+
+// Handler is what the session layer dispatches an inbound message to, once it
+// has demultiplexed capID and authorised the message (PROTOCOL.md §3, §6).
+//
+// It exists so that `session` does not import `caps`, which would be an import
+// cycle -- caps.Capability already imports session. A caps.Capability satisfies
+// this structurally; registration converts nothing.
+type Handler interface {
+	CapID() byte
+	Serve(ctx context.Context, sess Session, msgType uint16, payload []byte) error
+	ServeStream(ctx context.Context, sess Session, st Stream, msgType uint16, payload []byte) error
+}
+
+// Config is everything New needs that it cannot read off the QUIC connection.
+//
+// Peer carries the pinned record for an already-trusted peer. Its DeviceID is
+// empty during pairing, where no key is pinned yet (PROTOCOL.md §5); in that
+// case New still completes Hello and leaves authorisation to the caller.
+type Config struct {
+	Local       identity.Identity
+	Peer        identity.Peer
+	DisplayName string
+	Platform    string // "linux" | "windows" | "android" | "darwin"
+	Handlers    map[byte]Handler
+	Initiator   bool // true opens the control stream, false accepts it (§1.1)
+
+	// Authorize decides whether a peer may proceed, and is called once Hello
+	// has completed and the peer record is fully populated -- DeviceID and
+	// identity key derived from the TLS certificate, display name and
+	// protection tier as claimed -- but before any capability message is
+	// dispatched. Returning an error closes the session.
+	//
+	// This exists because the pinned-key comparison above it only fires when
+	// Peer is already populated, which the dialling side can do and the
+	// accepting side cannot: a listener does not know who is calling until
+	// Hello arrives. Without a hook here, every inbound connection would be
+	// admitted unconditionally.
+	//
+	// A nil Authorize admits any peer. That is deliberate and it is correct
+	// only for M1, whose stated scope is an explicit-address dial with the
+	// fingerprint shown and accepted interactively (BUILD-PLAN.md §5, M1).
+	// M2 replaces the callback with a trust-store lookup, at which point nil
+	// should stop being an accepted value on the listening path.
+	Authorize func(peer identity.Peer) error
+}
+
+// New wraps an established QUIC connection in a Session: it opens or accepts
+// the control stream, exchanges Hello, verifies that the peer's claimed
+// DeviceID matches its TLS key, and starts the control loop (PROTOCOL.md §4).
+//
+// This is the seam between conn (M1d, which owns dialling and accepting) and
+// session (M1a, which owns this implementation). Neither task may change the
+// signature alone.
+//
+// The implementation is newSession in session.go, which takes an internal
+// transport interface so the control loop can be tested without real QUIC.
+func New(ctx context.Context, qc *quic.Conn, cfg Config) (Session, error) {
+	return newSession(ctx, quicTransport{qc}, cfg)
 }

@@ -13,5 +13,19 @@
 //
 // Sharp edge: reject any path that is absolute, contains "..", or resolves
 // outside the destination root. Path traversal is the obvious attack on a file
-// transfer protocol and the check belongs here, not in the UI.
+// transfer protocol and the check belongs here, not in the UI. path.go owns
+// that check and refuses backslashes and volume separators too, so one offer
+// cannot mean two things on Linux and Windows.
+//
+// The offset in a chunk frame is a transfer-global offset into the offered
+// files concatenated in offer order, because the 12-byte frame carries no file
+// identifier and nothing else would tell the receiver which file a chunk
+// belongs to. Chunks therefore never span a file boundary: the last chunk of
+// each file is short.
+//
+// Data lands in "name.oapart" and is renamed to "name" only when every chunk
+// has verified against the manifest, so a cancelled or interrupted transfer
+// never presents a partial file as complete. The verified-chunk bitmap is
+// persisted alongside, which is what makes resume survive a reconnect rather
+// than only a retry inside one process.
 package files

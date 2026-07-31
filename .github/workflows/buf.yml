@@ -1,0 +1,55 @@
+name: buf
+
+# Gates the wire schema (proto/README.md, buf.yaml, buf.gen.yaml):
+#   buf lint      -- STANDARD ruleset (buf.yaml)
+#   buf breaking  -- against the default branch, FILE-level rules (buf.yaml)
+#
+# `buf breaking` needs the full git history of `main` to diff against, hence
+# fetch-depth: 0. On a push that lands directly on main (this repo's normal
+# workflow per AGENTS.md §4 -- no PR branches), the working tree and the
+# `main` ref it diffs against are the same commit, so the check is a no-op by
+# construction; it only bites when this runs against a divergent branch/PR.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "proto/**"
+      - "buf.yaml"
+      - "buf.gen.yaml"
+      - ".github/workflows/buf.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "proto/**"
+      - "buf.yaml"
+      - "buf.gen.yaml"
+      - ".github/workflows/buf.yml"
+
+concurrency:
+  group: buf-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  buf:
+    name: buf lint + breaking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for breaking-change diff)
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1.50.0
+
+      - name: buf lint
+        uses: bufbuild/buf-lint-action@v1.1.1
+        with:
+          input: proto
+
+      - name: buf breaking (against main)
+        uses: bufbuild/buf-breaking-action@v1.1.4
+        with:
+          input: proto
+          against: "https://github.com/${{ github.repository }}.git#branch=main"

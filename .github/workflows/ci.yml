@@ -1,0 +1,90 @@
+name: CI
+
+# Build plan definition of done (docs/BUILD-PLAN.md §1, item 3):
+#   go build ./... && go vet ./... && go test ./... clean, and
+#   GOOS=windows go build ./... clean (D-32 -- Windows must not silently rot).
+#
+# Two Go modules live in this repo (root github.com/shreyashsri79/openair, and
+# oabench/ github.com/shreyashsri79/openair/oabench with its own go.mod), so
+# every check below runs once per module rather than once for the whole tree.
+# openair-gui/ is a third Go module but is out of scope for this workflow --
+# it needs Fyne's system deps (GL/X11 headers) to build at all, which is a
+# separate concern from the build plan's Go-toolchain gate. See the X6 report
+# for that gap.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref so pushes to main don't queue stale CI.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gofmt:
+    name: gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt -l (must be empty)
+        run: |
+          files=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$files" ]; then
+            echo "gofmt -l found unformatted files:"
+            echo "$files"
+            echo
+            echo "Run 'gofmt -w' on the files above."
+            exit 1
+          fi
+
+  build-test:
+    name: build/vet/test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: root
+            dir: .
+          - name: oabench
+            dir: oabench
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: ${{ matrix.dir }}/go.mod
+          cache-dependency-path: ${{ matrix.dir }}/go.sum
+
+      - name: go build ./...
+        run: go build ./...
+
+      - name: go vet ./...
+        run: go vet ./...
+
+      - name: go test ./... (race-instrumented)
+        # -race is affordable here: nothing in this matrix depends on wall-clock
+        # network shaping (that lives in the netem workflow, gated separately).
+        # If a future package's tests become too slow under -race, scope the
+        # flag down to the other packages rather than dropping it repo-wide.
+        run: go test -race ./...
+
+      - name: GOOS=windows go build ./... (D-32)
+        run: GOOS=windows GOARCH=amd64 go build ./...
+        env:
+          CGO_ENABLED: 0

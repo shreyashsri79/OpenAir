@@ -1,0 +1,84 @@
+name: netem matrix
+
+# oabench/netem/lab.sh runs the transport matrix inside a private network
+# namespace (unshare -Urn) so it can shape loopback with `tc netem` without
+# real root. That is NOT guaranteed to work on a GitHub-hosted runner:
+#
+#   - `ubuntu-latest` is currently the Ubuntu 24.04 image, and Ubuntu has
+#     shipped an AppArmor policy since 23.10/24.04 that blocks unprivileged
+#     user-namespace creation by default (kernel.apparmor_restrict_unprivileged_userns=1).
+#     `unshare --user` fails with "Operation not permitted" out of the box.
+#   - The runner user does have passwordless sudo, so the restriction can be
+#     lifted for the job with a single sysctl (see the "Allow unprivileged
+#     user namespaces" step below) -- but that is a real requirement on the
+#     execution environment, not something a plain `go test` needs, and it
+#     has not been exercised on an actual hosted runner from this workflow.
+#
+# Per docs/BUILD-PLAN.md X6, that uncertainty means this does NOT run on a
+# schedule: a nightly cron that might be red every night trains everyone to
+# ignore CI. It is workflow_dispatch only. Once someone has run this via the
+# "Run workflow" button and confirmed it goes green, promoting the trigger to
+# a nightly `schedule:` is reasonable and worth a docs/decision-tree.md entry.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profiles:
+        description: "space-separated lab.sh profiles (see oabench/netem/lab.sh)"
+        required: false
+        default: "lan-1g wifi-5g wan-relay"
+      size:
+        description: "transfer size per run (oabench/netem/matrix.sh SIZE)"
+        required: false
+        default: "64MiB"
+      runs:
+        description: "runs per profile/transport (oabench/netem/matrix.sh RUNS)"
+        required: false
+        default: "1"
+
+jobs:
+  netem:
+    name: netem transport matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: oabench/go.mod
+          cache-dependency-path: oabench/go.sum
+
+      - name: Allow unprivileged user namespaces
+        # lab.sh's `unshare -Urn` needs this on Ubuntu 24.04+; see the header
+        # comment above. Fails loudly (not continue-on-error) if sudo itself
+        # is unavailable, since that means the rest of the job cannot work.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Preflight - confirm netns is actually usable
+        # Fail fast with a clear message rather than let the real failure
+        # surface confusingly deep inside matrix.sh/lab.sh.
+        run: |
+          if ! unshare -Urn true; then
+            echo "::error::unshare -Urn is not permitted on this runner even after the AppArmor sysctl override. oabench/netem/lab.sh cannot run here." >&2
+            exit 1
+          fi
+
+      - name: Run netem matrix
+        working-directory: oabench
+        env:
+          SIZE: ${{ inputs.size }}
+          RUNS: ${{ inputs.runs }}
+          OUT: ${{ github.workspace }}/oabench/netem/results.jsonl
+        run: |
+          # shellcheck disable=SC2086
+          ./netem/matrix.sh ${{ inputs.profiles }}
+
+      - name: Upload results
+        uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: netem-results
+          path: oabench/netem/results.jsonl
+          if-no-files-found: warn
