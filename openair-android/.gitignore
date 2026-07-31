@@ -14,3 +14,8 @@
 .cxx
 local.properties
 keystore.properties
+
+# The gomobile-bound core, built by ./build-aar.sh. It is a build artifact
+# (7 MB per ABI) and is rebuilt from mobile/ and internal/, so it does not
+# belong in VCS -- see AGENTS.md section 6 on build output.
+/app/libs/*.aar

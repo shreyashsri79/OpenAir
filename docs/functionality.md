@@ -5,7 +5,16 @@ Living doc. Update whenever you add/move/rename a file or change control flow/pr
 Core model (all modules): sender splits a file into offset-tagged chunks, opens multiple parallel TCP connections, streams chunks concurrently; receiver writes each chunk via `file.WriteAt(data, offset)` for out-of-order parallel reconstruction. Discovery via mDNS (`_openair._tcp`). Receiver does explicit Accept/Reject on incoming transfer metadata.
 
 ## openair-android (Kotlin)
-Purpose: Android app — device discovery, sending, and receiving over the OpenAir protocol.
+Purpose: Android app. It now has **two** stacks and two launcher entries, deliberately kept apart — v1 speaks TCP on `_openair._tcp`, v2 speaks QUIC on `_openair._udp`, and they cannot talk to each other at all, so a single blended UI could only half-work. The v1 screen goes away when the v2 shell reaches parity.
+
+v2 shell (`v2/`, X5) — Compose over the gomobile-bound Go core:
+- `v2/CoreRepository.kt` — owns the binding for the process: identity in `filesDir/openair`, received files under `getExternalFilesDir/OpenAir`. Every wrapper here exists because gomobile maps Go `int` to Java `long`, so counts and indices are narrowed in one place rather than at each call site.
+- `v2/V2ViewModel.kt` — the bridge between a Go goroutine and Compose. Blocking binding calls (`SendFiles`, `AwaitPeer`, `PairWithOffer`) go to `Dispatchers.IO`; the two synchronous prompts (SAS, offer) park their goroutine on a `CompletableDeferred` until the user answers. Discovery is polled every 500 ms because gobind carries no channels.
+- `v2/ui/V2Screen.kt` — pair, discover, send, receive, and the two dialogs. Plain on purpose: each control maps to one binding operation.
+- `v2/V2Activity.kt` — the second launcher entry.
+- `build-aar.sh` — builds `app/libs/openair.aar` from `mobile/`. The .aar is build output and is **not** in VCS; run this after a fresh clone and after any change under `mobile/` or `internal/`.
+
+v1 app (Kotlin sockets, unchanged):
 - `core/NsdDiscoveryManager.kt` — mDNS/NSD peer discovery on Android.
 - `core/OpenAirReceiver.kt` — receive-side socket handling on Android.
 - `core/OpenAirSender.kt` — send-side chunked streaming on Android.
@@ -38,6 +47,7 @@ Purpose: OpenAir 2.0. Per D-26 this is one module; `openair-gui` and `oabench` s
 - `internal/congestion` — BBR, vendored from Hysteria (D-35) and installed on live connections through the apernet fork's public `SetCongestionControl`. `PROVENANCE.md` records the upstream, the two local modifications and the re-sync procedure. Default gain profile is conservative (D-36).
 - `internal/discovery` — LAN discovery (PROTOCOL.md §15). `mdns.go` is §15.1 over `_openair._udp` — note the `_udp`, since v2 is QUIC and a v1.0 device on `_tcp` is deliberately invisible. `unicast.go` is §15.2's fallback for networks that filter multicast: a UDP beacon on port 53318 carrying query and announce datagrams, answered unicast to the asker so discovery converges in one round trip rather than one beacon interval. `announce.go` holds the single record shape both transports carry, the fallback's byte layout, and address ranking (routable before link-local before loopback). `discovery.go` merges both into one event stream with a TTL sweep. **It never dials** — its whole output is candidates, and keeping it apart from the connection manager is what stops an unauthenticated broadcast from causing an outbound connection. `BrowseOnly` listens without announcing, for processes that have no listening port to advertise.
 - `internal/caps/clipboard` — stub; M5.
+- `mobile/` — the gomobile-bindable façade (D-10, D-31). It is at the repo root rather than under `internal/` because `gomobile bind` cannot bind an internal package. `identity.go` opens the keys and the trust store; `pairing.go` runs §5 from either side behind an `SASVerifier` the shell must implement; `discovery.go` browses and returns an indexable `DeviceList`; `sender.go` and `receiver.go` are the two transfer paths, both gated on the trust store. `doc.go` states the gobind subset the API has to stay inside — no unsigned ints, no slices but `[]byte`, no maps or channels, callbacks as interfaces — which is why lists are objects with index accessors.
 - `internal/wire` — generated protobuf, committed (D-28).
 - `internal/{identity,session,caps,conn}/types.go` — the shared Phase 1 contracts (`DeviceID`, `Identity`, `TrustStore`, `Envelope`, `Session`, `Stream`, `Capability`, `Dialer`). Defined ahead of implementation so parallel agents could not invent incompatible boundaries; they survived wave 1 with one addition (`Config.Authorize`, D-37).
 
@@ -52,6 +62,7 @@ Sharp edges:
 - **A message that ends the conversation must not be followed straight by a close** — `CONNECTION_CLOSE` overtakes unflushed stream data and the peer never sees it (D-46). `internal/pairing` lingers 250 ms; the general fix is a flush-then-close on `session.Session`, which M4 will want.
 - A discovery candidate is an unauthenticated hint and nothing more. A matching DeviceID does **not** mean the device at those addresses holds the key for it — `TestHostileAnnounceCannotRedirectASession` is the proof, and the pinned-key TLS handshake is what actually decides.
 - `send` tries a discovered device's addresses in order, but stops dead on a key mismatch rather than trying the next one: the other addresses belong to the same impostor.
+- The Android `.aar` is per-ABI and about 7 MB each; `libgojni.so` lands at ~10 MB in the APK. Build the ABIs you need (`OPENAIR_AAR_TARGETS`), not all four.
 - Pairing admits an unpaired peer only while a window is open, and windows nest. A UI that opens one and forgets to close it leaves the device pairable indefinitely — `pair --listen` scopes it to the life of the command.
 - `identity.ProtectionTier` runs 0/1/2 with `TierNone` first, while the wire runs 1/2/3 in the opposite order. Convert, never cast — a cast downgrades a keystore-backed peer to unprotected (D-39).
 - `send` reads each source file twice: once for the offer and manifest digests, once to transmit. §8.4 permits a single pass by sending the manifest during the transfer, at the cost of buffering unverified chunks. Deliberate.

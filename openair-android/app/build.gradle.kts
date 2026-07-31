@@ -62,6 +62,13 @@ android {
 }
 
 dependencies {
+    // The gomobile-bound Go core (D-10, D-31). Built by ./build-aar.sh, which
+    // writes app/libs/openair.aar; it is a build artifact and is not in VCS, so
+    // this is a fileTree rather than a hard path -- the project still configures
+    // on a fresh clone, and only the v2 shell fails to compile until the .aar
+    // has been built.
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
@@ -71,6 +78,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.compose.ui:ui-text-google-fonts")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("androidx.compose.material:material-icons-extended")

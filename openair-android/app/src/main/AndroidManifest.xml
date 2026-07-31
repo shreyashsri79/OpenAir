@@ -37,6 +37,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The OpenAir 2.0 shell over the gomobile-bound Go core (X5).
+             A separate launcher entry rather than a replacement: v1 speaks TCP
+             on _openair._tcp and v2 speaks QUIC on _openair._udp, so the two
+             cannot talk to each other and must not appear to. -->
+        <activity
+            android:name=".v2.V2Activity"
+            android:exported="true"
+            android:label="@string/app_name_v2"
+            android:theme="@style/Theme.OpenAir">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

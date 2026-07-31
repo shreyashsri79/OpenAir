@@ -58,6 +58,7 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-46 | — | How does a last message survive the close behind it? | **accepted** — 250 ms linger before close |
 | D-47 | — | What is the unicast fallback's byte layout? | **accepted** — defined here; §15.2 specifies none |
 | D-48 | — | May a process browse without announcing? | **accepted** — yes, `BrowseOnly` |
+| D-49 | ADR-5 | How does the Android shell reach the core? | **accepted** — `mobile/` façade, .aar not in VCS |
 
 **Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; the port has now landed (D-35, D-36), so what remains is comparing BBRv1 against D-17's Cubic baseline.
 
@@ -944,3 +945,23 @@ Rationale: announcing a port this process is not listening on publishes an addre
 Alternatives considered: announcing the default port 9000 regardless (rejected for the reason above; it is only correct by accident, when a daemon happens to be listening on the same machine). Having `send` skip discovery entirely and require an address (rejected — it is exactly the typing M3 exists to remove). Announcing with a zero port and letting peers filter (rejected — it pushes a rule into every consumer instead of not saying the thing).
 
 Consequences: `recv` advertises the bound port rather than the requested one, so `--listen :0` works and does not tell peers to dial port zero. When M4's daemon arrives it is the only listening process, so it becomes the only announcer, and the CLI browsing beside it stays correct with no change.
+
+## D-49: The Android shell is a second launcher entry over a root-level `mobile/` façade, and the .aar is build output
+Date: 2026-07-31
+Status: accepted (implements ADR-5 / D-31)
+
+Context: D-31 verified that gomobile binds the v2 core. It did not say where the bindable package lives, how the .aar reaches Gradle, or what happens to the working v1.0 Kotlin app while the v2 shell is incomplete.
+
+Decision, in three parts.
+
+**The façade lives at `mobile/`, at the repo root.** `gomobile bind` cannot bind `internal/...`, so the binding has to sit outside the internal tree — which means the one package in this repo that is importable by anyone is also the one that has to stay inside gobind's subset of Go. That subset is narrow enough to shape the API: no unsigned integers (the core counts bytes in `uint64`, converted at the boundary), no slices but `[]byte` (so `DeviceList` and `FileList` are objects with index accessors), no maps, no channels, no generics, callbacks as Java-implemented interfaces. `doc.go` states it, because every one of those is a `gomobile bind` failure with an unhelpful message when it is forgotten.
+
+**The .aar is a build artifact and is not in version control.** `openair-android/build-aar.sh` produces `app/libs/openair.aar`, and Gradle picks it up through a `fileTree` so the project still configures on a fresh clone — only the v2 shell fails to compile until the binding has been built. It is roughly 7 MB per ABI, rebuilt from `mobile/` and `internal/` on every change, which is exactly what AGENTS.md §6 keeps out of the tree.
+
+**v1 and v2 are two launcher entries, not one blended UI.** They share no wire protocol: v2 is QUIC announcing `_openair._udp`, v1 is TCP on `_openair._tcp`, so a v1 device and a v2 device are mutually invisible by construction. Merging the screens would produce a device list where half the entries silently cannot be transferred to. The v1 screen is removed when the v2 shell reaches parity, not before.
+
+Alternatives considered: putting the façade under `internal/` and binding a thin wrapper elsewhere (rejected — the wrapper would be the façade, one indirection later). Committing the .aar so a clone builds without Go (rejected — it is 7 MB per ABI of derived output that goes stale silently against the Go tree it was built from). Replacing the v1 UI outright (rejected — it works today and v2 does not do notifications, clipboard or unlock yet; deleting a working app to make room for an incomplete one is a regression the user experiences).
+
+Consequences: the binding's threading contract is now load-bearing in the shell. Blocking calls (`SendFiles`, `AwaitPeer`, `PairWithOffer`) occupy their thread for the whole operation and must not run on the main looper; the two synchronous prompts (`SASVerifier`, `OfferVerifier`) are called on a Go goroutine and hold the exchange open until they return, which the view model bridges through a `CompletableDeferred`. Discovery is polled rather than subscribed, because gobind cannot carry a channel across the boundary — 500 ms, which is what a device picker wants anyway.
+
+Verified on this machine: `gomobile bind` produces a 7.5 MB arm64 .aar in about 50 seconds, the Kotlin compiles against it, and `assembleDebug` packages `lib/arm64-v8a/libgojni.so` into the APK. **Not verified: anything on a real device.** No handset was attached, so on-device transfer, battery and throughput remain what D-32 and the `oabench/androidkit/` runbook still owe.
