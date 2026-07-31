@@ -1,6 +1,8 @@
 package com.example.openair.v2
 
 import android.app.Application
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
@@ -15,9 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import mobile.Discovery
 import mobile.Pairing
-import mobile.Receiver
 import java.io.File
 
 /** One device as the UI shows it. */
@@ -75,6 +75,9 @@ data class V2UiState(
     val offerPrompt: OfferPrompt? = null,
     val sending: TransferState = TransferState(),
     val incoming: TransferState = TransferState(),
+    val clipboardText: String = "",
+    val lastClipboard: String = "",
+    val lastClipboardFrom: String = "",
     val status: String = "",
 )
 
@@ -92,8 +95,6 @@ class V2ViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(V2UiState())
     val state: StateFlow<V2UiState> = _state.asStateFlow()
 
-    private var receiver: Receiver? = null
-    private var discovery: Discovery? = null
     private var pairing: Pairing? = null
     private var pollJob: Job? = null
 
@@ -107,92 +108,69 @@ class V2ViewModel(app: Application) : AndroidViewModel(app) {
                 status = "ready",
             )
         }
+        // The listening half lives in ReceiveSession, held by a foreground
+        // service, so it survives this view model -- M4's rule applied to a
+        // process that has no daemon to talk to. Everything here mirrors it.
+        viewModelScope.launch {
+            ReceiveSession.state.collect { s ->
+                _state.update {
+                    it.copy(
+                        receiving = s.running,
+                        listenAddr = s.listenAddr,
+                        devices = s.devices.ifEmpty { it.devices },
+                        incoming = s.incoming,
+                        lastClipboard = s.lastClipboard,
+                        lastClipboardFrom = s.lastClipboardFrom,
+                        status = s.status.ifEmpty { it.status },
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            ReceiveSession.prompt.collect { p -> _state.update { it.copy(offerPrompt = p) } }
+        }
     }
 
     // ── receiving ─────────────────────────────────────────────────────────────
 
+    /**
+     * Starts the foreground service that holds the listener.
+     *
+     * Not the listener itself: a receiver owned by this view model dies with the
+     * activity, and then the device is reachable only while someone is looking
+     * at it. The service is what makes "send a file to my phone" work with the
+     * phone in a pocket.
+     */
     fun startReceiving() {
-        if (receiver != null) return
-        val r = repo.newReceiver(
-            displayName = _state.value.displayName,
-            onOffer = ::promptForOffer,
-            onProgress = { id, done, total ->
-                _state.update {
-                    it.copy(incoming = TransferState(id, done, total.coerceAtLeast(0), active = true))
-                }
-            },
-            onComplete = { id, ok ->
-                _state.update {
-                    it.copy(
-                        incoming = it.incoming.copy(transferId = id, active = false),
-                        status = if (ok) "received" else "transfer failed",
-                    )
-                }
-            },
-        )
-        viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { r.start(":0") } }
-                .onSuccess {
-                    receiver = r
-                    _state.update { it.copy(receiving = true, listenAddr = r.addr(), status = "listening") }
-                    // Announce the port actually bound, never the one requested.
-                    restartDiscovery(r.port().toInt())
-                }
-                .onFailure { e -> _state.update { it.copy(status = "listen failed: ${e.message}") } }
-        }
+        if (_state.value.receiving) return
+        ReceiverService.start(getApplication(), _state.value.displayName)
+        _state.update { it.copy(status = "starting") }
     }
 
     fun stopReceiving() {
-        val r = receiver ?: return
-        receiver = null
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) { runCatching { r.stop() } }
-            _state.update { it.copy(receiving = false, listenAddr = "", status = "stopped") }
-            restartDiscovery(0)
-        }
+        ReceiverService.stop(getApplication())
+        _state.update { it.copy(status = "stopping") }
     }
 
-    /**
-     * Called from a Go goroutine. It parks the transfer until the user answers,
-     * which is exactly what the binding expects: the offer verifier is a
-     * synchronous decision and the sender is held open for its duration.
-     */
-    private fun promptForOffer(peer: mobile.PeerInfo, offer: mobile.Offer): Boolean {
-        val prompt = OfferPrompt(
-            peerFingerprint = peer.fingerprint(),
-            peerName = peer.displayName(),
-            fileCount = offer.fileCount().toInt(),
-            totalBytes = offer.totalBytes(),
-            firstPath = if (offer.fileCount() > 0) offer.path(0) else "",
-            answer = CompletableDeferred(),
-        )
-        _state.update { it.copy(offerPrompt = prompt) }
-        return kotlinx.coroutines.runBlocking { prompt.answer.await() }
-    }
-
-    fun answerOffer(accept: Boolean) {
-        val prompt = _state.value.offerPrompt ?: return
-        prompt.answer.complete(accept)
-        _state.update { it.copy(offerPrompt = null, status = if (accept) "accepting" else "declined") }
-    }
+    /** Answers the offer prompt. The service's notification answers the same one. */
+    fun answerOffer(accept: Boolean) = ReceiveSession.answerOffer(accept)
 
     // ── discovery ─────────────────────────────────────────────────────────────
 
-    private fun restartDiscovery(listeningPort: Int) {
-        pollJob?.cancel()
-        discovery?.let { d -> runCatching { d.stop() } }
-
-        val d = repo.newDiscovery(_state.value.displayName, listeningPort)
-        runCatching { d.start() }
-            .onSuccess {
-                discovery = d
-                pollJob = viewModelScope.launch { pollDevices(d) }
-            }
-            .onFailure { e -> _state.update { it.copy(status = "discovery unavailable: ${e.message}") } }
-    }
-
+    /**
+     * Browses without announcing while nothing is listening (D-48). Once the
+     * service is up it owns discovery, and this only reads what it publishes.
+     */
     fun startDiscovery() {
-        if (discovery == null) restartDiscovery(receiver?.port()?.toInt() ?: 0)
+        if (pollJob != null) return
+        if (!ReceiveSession.isRunning) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) {
+                    ReceiveSession.restartDiscovery(_state.value.displayName, 0)
+                }
+            }
+        }
+        pollJob = viewModelScope.launch { pollDevices() }
     }
 
     /**
@@ -200,20 +178,10 @@ class V2ViewModel(app: Application) : AndroidViewModel(app) {
      * boundary, and a list that refreshes twice a second is what a device
      * picker wants anyway.
      */
-    private suspend fun pollDevices(d: Discovery) {
+    private suspend fun pollDevices() {
         while (true) {
             val snapshot = withContext(Dispatchers.IO) {
-                val list = d.peers()
-                (0 until list.len().toInt()).map { i ->
-                    DeviceRow(
-                        deviceId = list.deviceID(i.toLong()),
-                        fingerprint = list.fingerprint(i.toLong()),
-                        displayName = list.displayName(i.toLong()),
-                        addr = list.addr(i.toLong()),
-                        via = list.via(i.toLong()),
-                        paired = list.paired(i.toLong()),
-                    )
-                }
+                runCatching { ReceiveSession.peers() }.getOrDefault(emptyList())
             }
             _state.update { it.copy(devices = snapshot, pairedCount = repo.pairedCount()) }
             delay(500)
@@ -381,10 +349,56 @@ class V2ViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── clipboard ─────────────────────────────────────────────────────────────
+
+    fun setClipboardText(text: String) = _state.update { it.copy(clipboardText = text) }
+
+    /**
+     * Pushes text to a paired device (§9, M5).
+     *
+     * With the field left empty it sends what is on this phone's clipboard. That
+     * read has to happen while the app is in the foreground -- from Android 10
+     * the system refuses it otherwise -- which is exactly where a button press
+     * puts us.
+     */
+    fun pushClipboard(device: DeviceRow) {
+        if (!device.paired) {
+            _state.update { it.copy(status = "pair with ${device.fingerprint} first") }
+            return
+        }
+        val typed = _state.value.clipboardText
+        val text = typed.ifEmpty { readSystemClipboard() }
+        if (text.isEmpty()) {
+            _state.update { it.copy(status = "nothing to push: type something or copy it first") }
+            return
+        }
+
+        viewModelScope.launch {
+            _state.update { it.copy(status = "pushing clipboard") }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    ReceiveSession
+                        .clipboardFor(getApplication(), _state.value.displayName)
+                        .push(device.addr, text)
+                }
+            }
+            _state.update {
+                it.copy(status = result.fold({ "clipboard sent" }, { e -> "clipboard failed: ${e.message}" }))
+            }
+        }
+    }
+
+    private fun readSystemClipboard(): String {
+        val cm = getApplication<Application>()
+            .getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return ""
+        val clip = cm.primaryClip ?: return ""
+        if (clip.itemCount == 0) return ""
+        return clip.getItemAt(0).coerceToText(getApplication()).toString()
+    }
+
     override fun onCleared() {
+        // The receiver deliberately outlives this: it belongs to the service.
         pollJob?.cancel()
-        runCatching { discovery?.stop() }
-        runCatching { receiver?.stop() }
         runCatching { pairing?.stop() }
         super.onCleared()
     }

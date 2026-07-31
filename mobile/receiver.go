@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
 	"github.com/shreyashsri79/openair/internal/conn"
 	"github.com/shreyashsri79/openair/internal/identity"
@@ -42,6 +43,8 @@ type Receiver struct {
 	onDone     TransferCallback
 	onErr      ErrorCallback
 	onSession  SessionCallback
+
+	clip *Clipboard
 
 	ln     conn.Listener
 	cancel context.CancelFunc
@@ -97,6 +100,26 @@ func (r *Receiver) SetErrorCallback(cb ErrorCallback) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.onErr = cb
+}
+
+// SetClipboard registers a Clipboard on this receiver, so a paired device can
+// push content to it (§9, M5).
+//
+// It is separate from NewReceiver because the clipboard is optional and
+// independent: a shell that only receives files registers nothing, and a shell
+// that wants both shares one Clipboard between pushing and receiving. Call it
+// before Start -- registration happens when the listener is built, and a peer
+// can push on the next line.
+func (r *Receiver) SetClipboard(c *Clipboard) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.clip = c
+}
+
+func (r *Receiver) clipboard() *Clipboard {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.clip
 }
 
 // SetSessionCallback installs the sink for session establishment.
@@ -188,8 +211,13 @@ func (r *Receiver) Start(listenAddr string) error {
 
 	// capID 0 is registered so a peer that revokes this device mid-transfer is
 	// honoured while the transfer is still running (§6.1).
+	handlers := map[byte]session.Handler{files.CapID: cap, 0: pairHandler}
+	if c := r.clipboard(); c != nil {
+		handlers[clipboard.CapID] = c.capability()
+	}
+
 	ln, err := conn.Listen(listenAddr, r.id.impl, r.displayName, PlatformName,
-		map[byte]session.Handler{files.CapID: cap, 0: pairHandler}, authorize)
+		handlers, authorize)
 	if err != nil {
 		return err
 	}

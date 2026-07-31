@@ -17,6 +17,24 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- ── Staying reachable (X5, tracking M4) ──────────────────────────────
+         FOREGROUND_SERVICE / _DATA_SYNC : ReceiverService keeps the QUIC
+                                  listener and the LAN announcement alive while
+                                  no screen is open. Without it the phone stops
+                                  receiving the moment the activity is
+                                  destroyed. DATA_SYNC is the type Android 14+
+                                  requires to be declared for this shape of
+                                  work.
+         POST_NOTIFICATIONS     : the service's own notice, and the accept /
+                                  decline choice for an inbound transfer. A
+                                  refusal here does not stop the service; it
+                                  costs the offer prompt while the app is
+                                  backgrounded.
+    ──────────────────────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -53,6 +71,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- The listening half of the v2 core (X5). It is the Android
+             counterpart of `openaird`: there is no IPC, because D-31 puts the
+             same Go core in this process, so the "daemon" is a service here and
+             the UI reads its state directly. -->
+        <service
+            android:name=".v2.ReceiverService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>

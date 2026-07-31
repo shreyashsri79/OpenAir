@@ -65,6 +65,7 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-53 | — | Who answers for an unattended daemon? | **accepted** — nobody watching means refused |
 | D-54 | — | How does the core reach a system clipboard? | **accepted** — the desktop's own helper, as a subprocess |
 | D-55 | — | What does a refused peer hear? | **accepted** — NOT_PAIRED, and the dialler translates it |
+| D-56 | — | What is Android's daemon? | **accepted** — a foreground service, prompts via notification |
 
 **Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; the port has now landed (D-35, D-36), so what remains is comparing BBRv1 against D-17's Cubic baseline.
 
@@ -163,6 +164,11 @@ flowchart TD
     Q11 ==chosen==> D54["D-54 · exec the desktop's own helper —<br/>wl-copy, xclip, xsel, pbcopy, Set-Clipboard.<br/>No display dependency in a daemon that<br/>mostly runs without one"]:::accepted
     Q11 -.rejected.-> R11A["cgo X11/Wayland binding<br/>a build dependency per platform,<br/>and the Windows cross-build gate<br/>would need it too"]:::rejected
     D54 -.constrained by.-> D54N["wl-copy forks and holds the selection.<br/>Give it an exec pipe for stderr and Run<br/>blocks until the user copies something else"]:::evidence
+
+    Q12{"X5 / M4<br/>What keeps an Android device reachable?"}:::question
+    Q12 ==chosen==> D56["D-56 · a foreground service holding the listener,<br/>with the offer prompt on a notification.<br/>No IPC: D-31 puts the core in this process,<br/>so the daemon is a service, not a socket"]:::accepted
+    Q12 -.rejected.-> R12A["listener owned by the activity<br/>the phone stops receiving the moment<br/>the screen closes, which is most of the time<br/>somebody wants to send it a file"]:::rejected
+    D56 -.constrained by.-> D56N["Android 10+ ignores a background<br/>clipboard write, silently. The notification<br/>is what makes received content reachable"]:::evidence
 
     Q7{"ADR-6<br/>Keep consensus and replication?"}:::question
     Q7 ==chosen==> D11["D-11 · dropped<br/>every capability is a pairwise session;<br/>pairwise needs no agreement protocol"]:::accepted
@@ -1050,3 +1056,12 @@ Context: D-52 made the listener close a connection whose handshake failed. The f
 Decision: an authorize refusal closes with **`NOT_PAIRED` (§10, 0x04)**. And `conn.DialAddr` translates a remote application-error close into a `session.ProtocolError` carrying that code, so `session.ErrorCodeOf` works on a dial failure exactly as it does on a local one.
 Rationale: the code is the only thing the far end can act on, so it has to name what actually happened. The translation is what lets the layer with a user in front of it say "that device has not paired with this one; run `openair pair` on both ends" instead of quoting `Application error 0x1 (remote)`. Both the CLI and the daemon do exactly that.
 Consequences: the failure is now detected earlier — before any file is opened — which is better, but it means a caller's own pairing check is no longer the thing that produces the message. `TestSendRefusesUnpairedPeer` still asserts the advice reaches the user, and it now does so through the remote code rather than the local store.
+
+## D-56: Android's daemon is a foreground service, and its prompts are notifications
+Date: 2026-07-31
+Status: accepted
+Context: M4 gives the desktop `openaird`, so a file arrives whether or not a terminal is open. Android needed the same property and cannot have the same mechanism: D-31 puts the Go core in the app's own process via gomobile, so there is no second process to talk to and no IPC at all. Until now the v2 shell's `Receiver` was owned by the view model, which means the device stopped receiving the moment the activity was destroyed — which is most of the time anyone would want to send it something.
+Decision: a **foreground service** (`ReceiverService`) holds the listener, the LAN announcement and the clipboard sink for the process, with the state in a process-wide `ReceiveSession` the UI observes. An inbound offer is published to whichever of the two can answer — the in-app dialog, or the notification's accept/decline actions — both completing the same deferred, so whichever the user reaches first decides and the other becomes a no-op. Unanswered within 60 s is a decline, matching D-53.
+Rationale: it is the only mechanism Android offers for work that must outlive an activity, and `dataSync` is the type Android 14 requires such work to declare. Putting the prompt on the notification is what makes an unattended accept possible at all; without it the "daemon" would be running and unable to ask anyone anything.
+Alternatives considered: *WorkManager* (rejected — it schedules work, it does not hold a socket open). *A separate process with IPC, mirroring the desktop* (rejected — D-31 chose in-process for good reasons and this would re-introduce the boundary it removed, for one platform).
+Consequences, and one is a real limitation: **from Android 10 the system silently ignores a clipboard write from a process that is not in the foreground.** A received clipboard push therefore cannot reliably be pasted while the app is in the background — no error is reported, it simply does not happen. The write is attempted regardless for the foreground case, and the content is also put on a notification, which is what makes it reachable either way. `POST_NOTIFICATIONS` being refused does not stop the service; it costs the offer prompt while the app is backgrounded, and the transfer is then declined by timeout rather than accepted blindly.

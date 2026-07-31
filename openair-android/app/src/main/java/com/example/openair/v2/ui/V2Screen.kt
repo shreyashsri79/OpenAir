@@ -65,6 +65,7 @@ fun V2Screen(vm: V2ViewModel = viewModel()) {
             ThisDevice(state)
             ReceiveControls(state, vm)
             Files(state, onPick = { pickFile.launch(arrayOf("*/*")) }, onClear = vm::clearFiles)
+            ClipboardControls(state, vm)
             PairingControls(state, vm)
             Devices(state, vm)
             if (state.status.isNotEmpty()) {
@@ -204,6 +205,28 @@ private fun Files(state: V2UiState, onPick: () -> Unit, onClear: () -> Unit) {
     }
 }
 
+/**
+ * The clipboard half of M5. Text typed here is what gets pushed; left empty,
+ * the push takes whatever is on this phone's clipboard -- a read the system
+ * only permits while the app is in front, which a button press guarantees.
+ */
+@Composable
+private fun ClipboardControls(state: V2UiState, vm: V2ViewModel) {
+    OutlinedTextField(
+        value = state.clipboardText,
+        onValueChange = vm::setClipboardText,
+        label = { Text("clipboard text (empty = this phone's clipboard)") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    if (state.lastClipboard.isNotEmpty()) {
+        Text(
+            "from ${state.lastClipboardFrom}: ${state.lastClipboard.take(120)}",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
 @Composable
 private fun PairingControls(state: V2UiState, vm: V2ViewModel) {
     var code by remember { mutableStateOf("") }
@@ -265,6 +288,7 @@ private fun DeviceCard(d: DeviceRow, vm: V2ViewModel) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (d.paired) {
                     Button(onClick = { vm.sendTo(d) }) { Text("Send") }
+                    OutlinedButton(onClick = { vm.pushClipboard(d) }) { Text("Clipboard") }
                     OutlinedButton(onClick = { vm.unpair(d.deviceId) }) { Text("Unpair") }
                 } else {
                     // Discovery found it, but nothing has authenticated it. A
