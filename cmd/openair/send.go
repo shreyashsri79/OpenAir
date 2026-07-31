@@ -14,11 +14,13 @@ import (
 	"github.com/shreyashsri79/openair/internal/session"
 )
 
+// sendOptions has no "accept the fingerprint" flag any more: M2 answers that
+// question from the trust store, and a device that is not paired is refused
+// rather than prompted about.
 type sendOptions struct {
 	addr  string
 	paths []string
 	keys  string
-	yes   bool
 }
 
 func runSend(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -26,7 +28,6 @@ func runSend(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	var o sendOptions
 	fs.StringVar(&o.keys, "keys", "", "directory holding this device's keys")
-	fs.BoolVar(&o.yes, "yes", false, "accept the peer's fingerprint without asking")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -66,13 +67,24 @@ func send(ctx context.Context, o sendOptions, stdin io.Reader, stdout io.Writer)
 		},
 	})
 
+	store, err := loadTrustStore(o.keys)
+	if err != nil {
+		return err
+	}
+	pairHandler, err := newPairingHandler(id, store, stdin, stdout)
+	if err != nil {
+		return err
+	}
+
 	fmt.Fprintf(stdout, "this device: %s\n", fingerprint(id.DeviceID()))
 
-	d := conn.NewDialer(id, hostname(), platform(), map[byte]session.Handler{files.CapID: cap})
+	d := conn.NewDialer(id, hostname(), platform(),
+		map[byte]session.Handler{files.CapID: cap, 0: pairHandler})
 
-	// Nothing is pinned: M1 has no trust store to look a peer up in, so the
-	// key is learned from the handshake and shown to the user afterwards.
-	// identity.Peer's zero value is what session.New treats as "unpinned".
+	// An address is not an identity, so there is nothing to pin before the
+	// handshake: the key is learned from it and checked against the trust store
+	// immediately afterwards. identity.Peer's zero value is what session.New
+	// treats as "unpinned".
 	sess, err := d.DialAddr(ctx, o.addr, identity.Peer{})
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", o.addr, err)
@@ -84,8 +96,11 @@ func send(ctx context.Context, o sendOptions, stdin io.Reader, stdout io.Writer)
 	if peer.DisplayName != "" {
 		fmt.Fprintf(stdout, "  name: %s  platform: %s\n", peer.DisplayName, peer.Platform)
 	}
-	if !o.yes && !confirm(stdin, stdout, "does that fingerprint match the receiving device?") {
-		return fmt.Errorf("fingerprint not confirmed; nothing was sent")
+
+	// M2's rule, on the sending side: files go to devices this one paired with,
+	// and to no others. The receiving end enforces the same thing independently.
+	if err := requirePaired(pairHandler, peer); err != nil {
+		return fmt.Errorf("%w; nothing was sent", err)
 	}
 
 	transferID, err := cap.Send(ctx, sess, items)

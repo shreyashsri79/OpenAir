@@ -54,6 +54,8 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-42 | ADR-3 | Where is the privilege *public* key while sealed? | accepted — interim sidecar, pending Appendix A v2 |
 | D-43 | — | Is there a threat model? | accepted — document done; 4 questions open |
 | D-44 | — | What does CI enforce? | **accepted** — build/vet/test/Windows/buf; netem manual |
+| D-45 | — | Is §5.2's SAS transcript fully specified? | **accepted** — three gaps filled; §5.2 and §6.4 need edits |
+| D-46 | — | How does a last message survive the close behind it? | **accepted** — 250 ms linger before close |
 
 **Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; the port has now landed (D-35, D-36), so what remains is comparing BBRv1 against D-17's Cubic baseline.
 
@@ -108,6 +110,9 @@ flowchart TD
     D18 ==answered by==> D19["D-19 · key encrypted at rest under K_master<br/>keystore unseal, or Argon2id from a PIN;<br/>both decrypt the Ed25519 key into RAM<br/>for the 6-hour window"]:::accepted
     D19 ==resolved by==> D20["D-20 · two keys per device<br/>identity key always warm, keeps the machine<br/>reachable and runs clipboard and notifications;<br/>privilege key gated, needed only for Owned ops.<br/>D-18's never-expire IS the always-on designation"]:::accepted
     D19 ==resolved by==> D21["D-21 · three protection tiers<br/>1 keystore or TPM · 2 passphrase via Argon2id<br/>3 neither, so Trusted only, no Owned.<br/>Maintainer's Fedora box has TPM 2.0, so tier 1"]:::accepted
+    D7 ==pinned by==> D45["D-45 · pairing transcript, §5.2 gaps filled<br/>keys sorted by value so the digits are<br/>role-independent; absent privilege key encoded<br/>as 32 zero bytes; nonces ordered by §5.1 role"]:::accepted
+    D45 --> D46["D-46 · a message that ends the conversation<br/>lingers 250 ms before the close;<br/>CONNECTION_CLOSE overtakes unflushed stream data,<br/>losing a declined PairConfirm or an unpair"]:::accepted
+
     Q4 -.rejected.-> R4A["SSH-like, key possession alone<br/>SSH keys carry a passphrase in practice;<br/>adopting the model without the habit<br/>is strictly weaker"]:::rejected
     Q4 -.rejected.-> R4B["unlock per operation<br/>destroys S3, the away-from-home<br/>session it exists to serve"]:::rejected
 
@@ -861,3 +866,33 @@ Decision: three workflows. `ci.yml` runs `gofmt -l`, then `go build`, `go vet`, 
 The netem decision is the considered one. `oabench/netem/lab.sh` uses `unshare -Urn` specifically to avoid needing root, but Ubuntu's AppArmor policy since 23.10 blocks unprivileged user-namespace creation by default, so it fails out of the box on `ubuntu-latest`. The sysctl workaround is included along with a preflight step that fails loudly if it did not work, but none of it can be verified without actually running on a hosted runner. A nightly job that is red every night trains everyone to ignore CI, which is worse than no job.
 
 Consequences: `GOOS=windows go build` is now enforced on every push, which is what D-32 needs to keep Windows from rotting silently while its milestone is deferred. Three gaps CI cannot close, recorded rather than papered over: the definition of done's first condition ("runs end to end, by hand, on two real endpoints") is hardware-in-the-loop and no job substitutes for it; `openair-gui` is a third module needing system GL/X11 packages and is currently ungated; and `buf generate` reproducibility — that committed `internal/wire/` still matches what codegen produces — is checked by nothing, though `git diff --exit-code` after a generate step would catch it.
+
+## D-45: PROTOCOL.md §5.2 does not fully specify the pairing transcript; three gaps filled the same way on both sides
+Date: 2026-07-31
+Status: accepted
+
+Context: §5.2 defines the short authentication string as `SAS = decimal(SHA-256(transcript)[0:4]) mod 1000000` over a transcript of a domain separator, both identity keys, both privilege keys and both nonces. The SAS is the entire security of pairing — TLS is unauthenticated at that point, and two devices that derive different digits from the same exchange fail closed but never pair. Implementing M2 found three places where two conforming implementations could disagree.
+
+Decision: fill all three in `internal/pairing/sas.go`, and record here what the spec has to say for anyone else to interoperate.
+
+1. **Both key pairs are sorted by value, not by role.** `min(idA,idB) || max(idA,idB)`, likewise for the privilege keys. This is what makes the digits role-independent: neither device has to agree with the other about who is "first", so both derive the same bytes from the same facts. Sorting by role instead would need a tie-break the spec does not give.
+2. **A device at protection tier none has no privilege key (D-21), and §5.2 gives no encoding for its absence.** Omitting the field would make the transcript variable-width with no delimiters, so the two sides could parse the same bytes differently. It is encoded as 32 zero bytes, keeping every field fixed-width.
+3. **The nonces are ordered by role, and "which role" was ambiguous.** §5.2 glosses the order as "initiator's nonce first", but §5.1 has the *offerer* initiate the pairing while the *scanner* initiates the connection. The literal `nonceA || nonceB` with A as §5.1 defines it — the device that displayed the code — is what is implemented.
+
+Alternatives considered: ordering the nonces by their owner's identity key, the way the keys are ordered (rejected for now — it would remove the last role dependence and the ambiguity with it, which is strictly better, but it is a wire-visible change to a normative section and belongs in a spec edit rather than in an implementation choice made unilaterally). Treating the absent privilege key as an error and refusing to pair with a tier-none device (rejected — D-21 exists precisely so those devices can still reach Trusted).
+
+Consequences: **`PROTOCOL.md` §5.2 needs three edits** — state the sort, state the zero-byte substitution, and disambiguate the nonce order (preferably by adopting the sort there too). Until then this implementation is the de facto definition, which is the situation D-34 already flagged as the cost of a prose spec. A fourth, smaller edit belongs with them: **§6.4's prose still describes its own trust scale ("1 = Trusted, 2 = Owned")** while the schema types `CapabilityGrant.level` as the shared `TrustLevel` enum. That is exactly the disagreement between a grant and a revoke that D-34's defect 4 introduced `TrustLevel` to prevent; the schema is right and the prose is stale.
+
+## D-46: A message that ends the conversation lingers before the session closes
+Date: 2026-07-31
+Status: accepted
+
+Context: two failures in M2, found by tests rather than by reading. A declined `PairConfirm` never reached the peer, which then sat waiting out the full two-minute pairing timeout while the user who declined had already walked away. A `Revoke` carrying `new_level = 0` never reached the peer either — and that one is worse, because §6.1 requires the peer to discard both pinned keys on receipt, so it went on believing a pairing that had been destroyed still held.
+
+Both have one cause: QUIC's `CONNECTION_CLOSE` preempts stream data that has not been flushed. Writing a message and closing immediately behind it loses the message. `oabench` hit the same thing and worked around it by draining the control stream to EOF before closing (recorded in the functionality map), so this is the second independent encounter with it.
+
+Decision: a message that ends the conversation waits `notifyLinger` — 250 ms — before the close that follows it. It applies in exactly two places, both in `internal/pairing`: `settle` after a declined `PairConfirm`, and `Revoke` after an unpairing `Revoke`.
+
+Alternatives considered: draining the control stream to EOF before closing, as `oabench` does (rejected here — the peer is not obliged to close its side promptly, so the drain has no bound; the same reasoning does not apply to `oabench`, where both ends are the same program). Not closing at all and letting the peer close on receipt (rejected as the sole mechanism — it is the normal path and does happen, but a peer that ignores the message would leave the session open indefinitely; the local close is the fallback). Making enforcement depend on delivery (rejected outright — §6.3 already establishes that enforcement is local and `SessionKill` is a courtesy, which is why the trust store and the live `Guard` are both updated *before* the message goes out; the linger only decides whether the peer is *told*, never whether the revoke took effect).
+
+Consequences: `Revoke` blocks its caller for a quarter of a second on a deliberate user action, which is not worth engineering around. The real limitation is that 250 ms is a heuristic, not a guarantee — a peer on a slow path can still miss the notification, and the design has to stay correct when it does. It is: the revoking side has already deleted the record and lowered the guard, so a peer that never hears about it is refused on its next operation regardless. **A general fix belongs in the session layer, not here** — something like a `CloseAfterFlush` on `session.Session` that waits for the control stream's write side to be acknowledged. M4's daemon will want it, since every capability that ends a conversation has this problem.

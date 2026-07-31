@@ -83,22 +83,34 @@ func receive(ctx context.Context, o recvOptions, stdin io.Reader, stdout io.Writ
 		},
 	})
 
-	// The peer gate. M1 pins nothing in advance, so this is where an inbound
-	// device is either recognised by its fingerprint or turned away
-	// (session.Config.Authorize).
+	// The peer gate. M1 asked the user to eyeball a fingerprint on every
+	// inbound connection; M2 answers the same question from the trust store, so
+	// an unpaired device is turned away before it can send anything at all.
+	store, err := loadTrustStore(o.keys)
+	if err != nil {
+		return err
+	}
+	pairHandler, err := newPairingHandler(id, store, stdin, stdout)
+	if err != nil {
+		return err
+	}
 	authorize := func(peer identity.Peer) error {
-		fmt.Fprintf(stdout, "\ninbound connection from %s\n", fingerprint(peer.DeviceID))
+		if err := pairHandler.Authorize(peer); err != nil {
+			fmt.Fprintf(stdout, "\nrefused %s: %v\n", fingerprint(peer.DeviceID), err)
+			return err
+		}
+		fmt.Fprintf(stdout, "\ninbound connection from %s", fingerprint(peer.DeviceID))
 		if peer.DisplayName != "" {
-			fmt.Fprintf(stdout, "  name: %s  platform: %s\n", peer.DisplayName, peer.Platform)
+			fmt.Fprintf(stdout, " (%s on %s)", peer.DisplayName, peer.Platform)
 		}
-		if o.yes || confirm(stdin, stdout, "does that fingerprint match the sending device?") {
-			return nil
-		}
-		return fmt.Errorf("fingerprint not confirmed by the user")
+		fmt.Fprintln(stdout)
+		return nil
 	}
 
+	// capID 0 is registered too, so a peer that revokes this device mid-session
+	// is honoured while the transfer is still running (§6.1).
 	ln, err := conn.Listen(o.listen, id, hostname(), platform(),
-		map[byte]session.Handler{files.CapID: cap}, authorize)
+		map[byte]session.Handler{files.CapID: cap, 0: pairHandler}, authorize)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

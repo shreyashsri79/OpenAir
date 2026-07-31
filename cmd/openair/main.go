@@ -1,15 +1,17 @@
 // Command openair is the command-line client for the local daemon.
 //
-// M1 has no daemon yet (that is M4) and no discovery (M3), so the two
-// subcommands here drive a session directly:
+// There is no daemon yet (that is M4) and no discovery (M3), so these
+// subcommands drive a session directly:
 //
+//	openair pair --listen :9000            # on one device
+//	openair pair openair://pair/...        # on the other
 //	openair recv --listen :9000 --dir ./inbox
 //	openair send ./file 10.0.0.5:9000
 //
-// There is no pairing at this milestone either (M2), so neither end knows the
-// other's key in advance. Both are shown the peer's fingerprint and asked to
-// confirm it out of band -- which is the whole of M1's security model, and the
-// reason --yes exists but is not the default.
+// M2 replaced M1's fingerprint prompt with pairing: the two devices exchange
+// keys once, both users compare six digits, and the keys are pinned. After
+// that, transfers go to paired devices and are refused for everyone else --
+// on both ends, independently.
 package main
 
 import (
@@ -28,16 +30,20 @@ func main() {
 const usage = `openair -- direct file transfer over QUIC
 
 usage:
+  openair pair --listen ADDR [--keys DIR]
+  openair pair [--addr ADDR] [--keys DIR] OFFER
   openair recv [--listen ADDR] [--dir DIR] [--keys DIR] [--yes]
-  openair send [--keys DIR] [--yes] FILE... ADDR
+  openair send [--keys DIR] FILE... ADDR
 
 commands:
+  pair    exchange keys with another device, once, and pin them
   recv    listen for an inbound transfer and write it to --dir
   send    connect to ADDR (host:port) and offer FILE...
 
-Both ends print the peer's device fingerprint and wait for confirmation.
-Compare the two by some means other than this connection -- that comparison
-is what authenticates the transfer until pairing lands.
+Pair before transferring: one device runs "pair --listen" and shows a code,
+the other is given that code. Both then display six digits, and pairing
+completes only if they match on both screens. Transfers to a device that was
+never paired are refused at both ends.
 `
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -47,6 +53,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 
 	switch args[0] {
+	case "pair":
+		return runPair(args[1:], stdin, stdout)
 	case "recv":
 		return runRecv(args[1:], stdin, stdout)
 	case "send":

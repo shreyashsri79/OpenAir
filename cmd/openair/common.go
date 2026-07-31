@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/shreyashsri79/openair/internal/identity"
+	"github.com/shreyashsri79/openair/internal/pairing"
 )
 
 // defaultKeyDir is where this device's keys live when --keys is not given.
@@ -44,6 +47,65 @@ func loadIdentity(dir string) (*identity.FileIdentity, error) {
 		dir = defaultKeyDir()
 	}
 	return identity.LoadOrCreate(identity.Options{Dir: dir, Tier: identity.TierNone})
+}
+
+// trustStoreName is the trust store's filename inside the key directory. The
+// two live together because they are the same secret in two halves: the keys
+// this device holds, and the keys it has decided to believe.
+const trustStoreName = "trust.json"
+
+// loadTrustStore opens the trust store beside this device's keys, creating an
+// empty one on first run.
+func loadTrustStore(dir string) (*identity.FileTrustStore, error) {
+	if dir == "" {
+		dir = defaultKeyDir()
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("create key directory: %w", err)
+	}
+	return identity.OpenTrustStore(filepath.Join(dir, trustStoreName))
+}
+
+// newPairingHandler builds the capID 0 handler that owns pairing, revocation
+// and grants, with a Confirm that shows the short authentication string on this
+// terminal.
+//
+// There is no --yes here and there must not be: PROTOCOL.md §5.2 forbids a
+// skip-verification path, because the digits are the only thing that detects a
+// man in the middle during pairing. --yes elsewhere in this CLI answers "is
+// this the device I meant", which the trust store answers afterwards; this
+// question has no safe default.
+func newPairingHandler(local identity.Identity, store identity.TrustStore, in io.Reader, out io.Writer) (*pairing.Handler, error) {
+	return pairing.NewHandler(pairing.Config{
+		Local:       local,
+		Store:       store,
+		DisplayName: hostname(),
+		Platform:    platform(),
+		Confirm: func(_ context.Context, sas string, peer pairing.PeerInfo) (bool, error) {
+			fmt.Fprintf(out, "\npairing with %s\n", fingerprint(peer.DeviceID))
+			if peer.DisplayName != "" {
+				fmt.Fprintf(out, "  name: %s  platform: %s\n", peer.DisplayName, peer.Platform)
+			}
+			fmt.Fprintf(out, "\n  %s\n\n", pairing.FormatSAS(sas))
+			return confirm(in, out, "do both devices show exactly these six digits?"), nil
+		},
+	})
+}
+
+// requirePaired is the sending side of M2's rule: a transfer only goes to a
+// device this one has paired with. The receiving side enforces the same thing
+// in session.Config.Authorize before any capability message is dispatched; this
+// is the check the dialler makes for itself, after the handshake has told it
+// whose key answered.
+func requirePaired(h *pairing.Handler, peer identity.Peer) error {
+	if err := h.Authorize(peer); err != nil {
+		if errors.Is(err, identity.ErrKeyMismatch) {
+			return fmt.Errorf("%w\nthe device at that address is not the one you paired; re-pair with `openair pair`", err)
+		}
+		return fmt.Errorf("%s is not paired with this device; run `openair pair` on both ends first",
+			fingerprint(peer.DeviceID))
+	}
+	return nil
 }
 
 // fingerprint formats a DeviceID for a human to read aloud or compare on a
