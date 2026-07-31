@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/shreyashsri79/openair/internal/caps"
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/session"
+	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
 )
 
 // This package is written against session.Session and never touches quic-go,
@@ -59,11 +62,41 @@ type fakeSession struct {
 	// resetWith, if set, resets every inbound stream with this code instead of
 	// serving it: the §6 refusal, as a client sees it.
 	resetWith session.ErrorCode
+
+	// path, when set, is what PathInfo reports: M11's read-ahead adapts to it,
+	// so a test needs to be able to say "this is a relayed path".
+	path *session.PathInfo
+
+	// latency delays every response, which is the only way to tell read-ahead
+	// from luck on a loopback pipe.
+	latency time.Duration
+
+	mu    sync.Mutex
+	reads []readCall
 }
 
-func (s *fakeSession) Peer() identity.Peer        { return s.peer }
-func (s *fakeSession) SendDatagram([]byte) error  { return errors.New("fake: no datagrams") }
-func (s *fakeSession) PathInfo() session.PathInfo { return session.PathInfo{Class: "lan"} }
+// readCall records one §11.2 range read as the source saw it.
+type readCall struct {
+	offset uint64
+	length uint64
+}
+
+func (s *fakeSession) Peer() identity.Peer       { return s.peer }
+func (s *fakeSession) SendDatagram([]byte) error { return errors.New("fake: no datagrams") }
+
+func (s *fakeSession) PathInfo() session.PathInfo {
+	if s.path != nil {
+		return *s.path
+	}
+	return session.PathInfo{Class: "lan"}
+}
+
+// readsSeen is the range reads the source has been asked for, in order.
+func (s *fakeSession) readsSeen() []readCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]readCall(nil), s.reads...)
+}
 func (s *fakeSession) Close(uint16, string) error { return nil }
 func (s *fakeSession) Done() <-chan struct{}      { return nil }
 func (s *fakeSession) Quiesce(context.Context, uint32, string) (func(), error) {
@@ -87,6 +120,22 @@ func (s *fakeSession) OpenStream(ctx context.Context) (session.Stream, error) {
 			st.Reset(uint32(s.resetWith))
 			return
 		}
+		if env.MsgType == MsgReadRequest {
+			var req openairv1.ReadRequest
+			if proto.Unmarshal(env.Payload, &req) == nil {
+				s.mu.Lock()
+				s.reads = append(s.reads, readCall{offset: req.GetOffset(), length: req.GetLength()})
+				s.mu.Unlock()
+			}
+		}
+		if s.latency > 0 {
+			select {
+			case <-time.After(s.latency):
+			case <-ctx.Done():
+				st.Reset(uint32(session.CodeResourceExhausted))
+				return
+			}
+		}
 		if err := s.source.ServeStream(ctx, s, st, env.MsgType, env.Payload); err != nil {
 			code, ok := session.ErrorCodeOf(err)
 			if !ok {
@@ -101,6 +150,14 @@ func (s *fakeSession) OpenStream(ctx context.Context) (session.Stream, error) {
 // newPair returns a client capability and a session pointed at a source
 // sharing roots.
 func newPair(t *testing.T, cfg Config) (*Capability, session.Session) {
+	t.Helper()
+	client, sess := newFakePair(t, cfg)
+	return client, sess
+}
+
+// newFakePair is newPair with the session's concrete type, for the M11 tests
+// that need to see what the source was asked for.
+func newFakePair(t *testing.T, cfg Config) (*Capability, *fakeSession) {
 	t.Helper()
 	source := New(cfg)
 	client := New(Config{})

@@ -731,6 +731,24 @@ Read-ahead window SHOULD adapt to `PathInfo` — roughly RTT × observed bitrate
 An LRU disk cache MAY be kept; if it is, it MUST be encrypted at rest and
 size-capped, because it holds someone else's files (PRD K8).
 
+A client that reads ahead MUST abandon reads outside the window when the read
+position moves. This is the one normative sentence in this section, and it is
+here because the alternative is not a slow client but a broken one: with one
+request per stream (§11.2), a seek whose old read-ahead is still queued costs
+the time to drain that window rather than one round trip, and the cost grows
+with the window a client chose for its own benefit.
+
+This implementation reads whole 1 MiB blocks, four in flight, with a window of
+four times the bandwidth-delay product — bitrate measured from completed reads —
+floored at 4 MiB and capped at 16 MiB, cancelling everything outside it on every
+position change (D-78). Its cache is XChaCha20-Poly1305 under a key held only in
+memory, capped at 512 MiB, and removed both at start and at exit (D-79).
+
+**Local delivery is not part of this protocol.** How a client hands the bytes to
+a media player is its own business; ours publishes a loopback HTTP URL carrying
+an unguessable token, so that a player's `Range` request becomes a §11.2 read
+with nothing in between (D-80).
+
 ---
 
 ## 12. Capability: `notifications` (capID 4) — Phase 3

@@ -49,6 +49,7 @@ usage:
   openair clip push DEVICE|ADDR [TEXT]
   openair ls DEVICE [PATH] [-l] [--all] [--socket PATH]
   openair get DEVICE PATH [--out FILE] [--offset N] [--length N]
+  openair stream DEVICE PATH [--open|--with PLAYER] [--stop]
   openair notify [DEVICE] --title TEXT [--body TEXT|--stdin] [--app ID]
   openair dismiss KEY [--device DEVICE] [--action ID [--reply TEXT]]
   openair protect [--keys DIR]
@@ -127,6 +128,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runLs(args[1:], stdout)
 	case "get":
 		return runGet(args[1:], stdout)
+	case "stream":
+		return runStream(args[1:], stdout)
 	case "notify":
 		return runNotify(args[1:], stdin, stdout)
 	case "dismiss":

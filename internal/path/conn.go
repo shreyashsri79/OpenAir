@@ -265,9 +265,22 @@ func (c *Conn) deliver(p inbound) {
 // an ordinary direct peer.
 func (c *Conn) ReadFrom(p []byte) (int, net.Addr, error) {
 	for {
+		// The deadline is checked here, not only when the channel closes.
+		// Waking on a close alone is edge-triggered, and the edge can land
+		// while no reader is in the select below -- a reader arriving
+		// afterwards would then wait on a channel nobody will ever close,
+		// with a deadline that passed before it got here. That is not a
+		// missed timeout but a permanent one: quic-go's Transport.Close
+		// unblocks its read loop by setting a deadline in the past and then
+		// waits for it to return, so it never returns and neither does the
+		// daemon's shutdown.
 		c.dmu.Lock()
 		deadlineCh := c.deadlineCh
+		expired := c.expiredLocked()
 		c.dmu.Unlock()
+		if expired {
+			return 0, nil, os.ErrDeadlineExceeded
+		}
 
 		select {
 		case msg := <-c.in:
@@ -276,13 +289,19 @@ func (c *Conn) ReadFrom(p []byte) (int, net.Addr, error) {
 			return 0, nil, ErrClosed
 		case <-deadlineCh:
 			c.dmu.Lock()
-			expired := !c.readDeadline.IsZero() && !time.Now().Before(c.readDeadline)
+			expired := c.expiredLocked()
 			c.dmu.Unlock()
 			if expired {
 				return 0, nil, os.ErrDeadlineExceeded
 			}
 		}
 	}
+}
+
+// expiredLocked reports whether a read deadline is set and already past.
+// c.dmu must be held.
+func (c *Conn) expiredLocked() bool {
+	return !c.readDeadline.IsZero() && !time.Now().Before(c.readDeadline)
 }
 
 // WriteTo sends a packet, choosing the path.

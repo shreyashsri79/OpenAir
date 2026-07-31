@@ -176,6 +176,11 @@ type Daemon struct {
 	// relay is the live relay connection and the listener riding it (M8).
 	relay relayState
 
+	// streams is the loopback HTTP server that lets a media player open a
+	// remote file (M11). Nil until a shell asks for a URL: a daemon nobody has
+	// asked to stream anything listens on nothing extra.
+	streams *streamServer
+
 	mu       sync.Mutex
 	sessions map[identity.DeviceID]session.Session
 	clients  map[*client]struct{}
@@ -428,6 +433,13 @@ func (d *Daemon) Close() error {
 		}
 		if d.ipcLn != nil {
 			d.ipcLn.Close()
+		}
+		d.mu.Lock()
+		streams := d.streams
+		d.streams = nil
+		d.mu.Unlock()
+		if streams != nil {
+			streams.close()
 		}
 		// A unix socket outlives its process unless removed. Leaving it behind
 		// makes the next start look like an already-running daemon.

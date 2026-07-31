@@ -2,8 +2,10 @@ package path
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
+	"os"
 	"testing"
 	"time"
 
@@ -508,5 +510,84 @@ func TestTrafficKeepsARouteAlive(t *testing.T) {
 	c.sweep(time.Now())
 	if _, ok := c.Direct(peer); !ok {
 		t.Fatal("a route that just carried a packet was abandoned")
+	}
+}
+
+// TestAReadDeadlineIsNotJustAnEdge is a shutdown bug, not a timeout bug.
+//
+// quic-go unblocks its read loop by setting a deadline in the past and then
+// waiting for the loop to return (Transport.Close). If the deadline only ever
+// wakes a reader that happens to be waiting at that instant, a reader arriving
+// a moment later waits on a fresh channel nobody will close, with a deadline
+// that has already passed — and Close waits for it forever, which is a daemon
+// that cannot shut down.
+func TestAReadDeadlineIsNotJustAnEdge(t *testing.T) {
+	c := newConn(t, "aaaaaaaaaaaaaaaa")
+	defer c.Close()
+
+	// The deadline is set while nothing is reading, and long enough ago that
+	// any timer it armed has already fired.
+	if err := c.SetReadDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 1500)
+		_, _, err := c.ReadFrom(buf)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("a read past its deadline returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a read whose deadline had already passed never returned")
+	}
+
+	// Clearing it puts the conn back to blocking, which is what quic-go does
+	// after a close that did not happen.
+	if err := c.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		buf := make([]byte, 1500)
+		_, _, err := c.ReadFrom(buf)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("a read with no deadline returned straight away: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestADeadlineWakesAReaderAlreadyWaiting is the other half: the edge still
+// works, which is the ordinary timeout case.
+func TestADeadlineWakesAReaderAlreadyWaiting(t *testing.T) {
+	c := newConn(t, "aaaaaaaaaaaaaaaa")
+	defer c.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 1500)
+		_, _, err := c.ReadFrom(buf)
+		done <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	if err := c.SetReadDeadline(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("a waiting read returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("setting a deadline did not wake a waiting read")
 	}
 }

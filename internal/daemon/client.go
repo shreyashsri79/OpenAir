@@ -221,6 +221,35 @@ func (c *Client) Fetch(ctx context.Context, device, path, dest string, offset, l
 	return resp.GetBytesWritten(), nil
 }
 
+// Stream publishes a remote file on a loopback HTTP URL that a media player can
+// open (M11, §11.2). Every Range request the player makes becomes a range read
+// on the wire; nothing is downloaded ahead of what it asks for beyond the
+// read-ahead window.
+func (c *Client) Stream(ctx context.Context, device, path string) (url, mime string, size uint64, err error) {
+	var resp openairv1.DaemonStreamResponse
+	req := &openairv1.DaemonStreamRequest{Device: device, Path: path}
+	if err := c.peer.Do(ctx, ipc.MsgStreamRequest, req, &resp); err != nil {
+		return "", "", 0, err
+	}
+	if resp.GetError() != "" {
+		return "", "", 0, errors.New(resp.GetError())
+	}
+	return resp.GetUrl(), resp.GetMime(), resp.GetSize(), nil
+}
+
+// StopStream withdraws a URL published by Stream.
+func (c *Client) StopStream(ctx context.Context, device, path string) error {
+	var resp openairv1.DaemonStreamResponse
+	req := &openairv1.DaemonStreamRequest{Device: device, Path: path, Stop: true}
+	if err := c.peer.Do(ctx, ipc.MsgStreamRequest, req, &resp); err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		return errors.New(resp.GetError())
+	}
+	return nil
+}
+
 // Notify mirrors a notification to a device, or to every connected device when
 // device is empty (M12, §12).
 //

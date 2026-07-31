@@ -52,6 +52,8 @@ enum DaemonMessageType {
   DAEMON_MESSAGE_TYPE_NOTIFY_RESPONSE = 28;
   DAEMON_MESSAGE_TYPE_DISMISS_REQUEST = 29;
   DAEMON_MESSAGE_TYPE_DISMISS_RESPONSE = 30;
+  DAEMON_MESSAGE_TYPE_STREAM_REQUEST = 31;
+  DAEMON_MESSAGE_TYPE_STREAM_RESPONSE = 32;
 }
 
 // DaemonStatusRequest asks what the daemon is and what it is doing.
@@ -348,6 +350,27 @@ message DaemonFetchResponse {
   uint64 bytes_written = 2;
   string dest = 3;
   string error = 4;
+}
+
+// DaemonStreamRequest asks the daemon to serve a remote file over local HTTP
+// so that a media player can open it (M11, §11.2, §11.4).
+//
+// The daemon is the only side that can do this: it holds the session, the
+// unlock and the read-ahead. What comes back is a loopback URL carrying an
+// unguessable token, which the shell hands to a player.
+message DaemonStreamRequest {
+  uint64 request_id = 1;
+  string device = 2;
+  string path = 3;
+  bool stop = 4;  // stop serving the URL previously returned for this path
+}
+
+message DaemonStreamResponse {
+  uint64 request_id = 1;
+  string url = 2;
+  string mime = 3;
+  uint64 size = 4;
+  string error = 5;
 }
 
 // DaemonNotifyRequest mirrors a notification to a device (M12, §12). The
