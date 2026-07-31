@@ -22,13 +22,18 @@ type Identity struct {
 // directory is empty. It is safe to call on every app start; it is not safe to
 // call concurrently on the same directory.
 //
-// The protection tier is TierNone: M1 has no unlock flow, so there is no
-// privilege key to protect, and generating one this device cannot seal would
-// advertise a tier it does not actually offer (D-21). TierKeystore arrives with
-// M6, backed by the Android Keystore, and changes this call's options, not its
-// signature.
+// The protection tier is read from the directory rather than chosen here
+// (D-21): a device that has run Protect holds a sealed privilege key whose
+// container says which tier it belongs to, and one that has not is tier 3,
+// which pairs and transfers but never reaches Owned. Passing a tier that
+// disagrees with the disk is an error rather than a silent downgrade, so
+// detecting is the only correct thing to do on a path that runs at every start.
 func LoadIdentity(dir string) (*Identity, error) {
-	impl, err := identity.LoadOrCreate(identity.Options{Dir: dir, Tier: identity.TierNone})
+	tier, err := identity.DetectTier(dir)
+	if err != nil {
+		return nil, err
+	}
+	impl, err := identity.LoadOrCreate(identity.Options{Dir: dir, Tier: tier})
 	if err != nil {
 		return nil, err
 	}

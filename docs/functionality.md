@@ -1,4 +1,4 @@
-# Functionality Map
+`unlock.go` is M6 across the binding: `Protect` takes a 32-byte key-encryption key the Android Keystore released after a credential challenge (tier 1), `Unlock`/`Lock`/`LockPeer`/`UnlockedUntil` drive the per-peer session, and `SetOwned` is the local promotion. The split is deliberate — Go holds the sealed key and the timer and can never obtain a credential for itself, Kotlin holds the Keystore and never sees the privilege key.  `OwnedAccess` states this device's protection tier plainly, including tier 3 and "no screen lock", because a user who believes they have unattended access and does not is worse off than one who was told.# Functionality Map
 
 Living doc. Update whenever you add/move/rename a file or change control flow/protocol — same commit as the code change. See AGENTS.md for rules. If this file and the code disagree, code wins — fix this file.
 
@@ -13,7 +13,8 @@ v2 shell (`v2/`, X5) — Compose over the gomobile-bound Go core:
 - `v2/ui/V2Screen.kt` — pair, discover, send, receive, and the two dialogs. Plain on purpose: each control maps to one binding operation.
 - `v2/ReceiveSession.kt` — the listening half of the core, held for the whole process rather than by a view model (D-56). Receiver, discovery and the clipboard sink live here, with the offer prompt published to whoever can answer it. Sixty seconds unanswered is a decline, never an accept.
 - `v2/ReceiverService.kt` — the foreground service that keeps `ReceiveSession` alive with no screen open: this is Android's `openaird`, minus the IPC that D-31 makes unnecessary. Its notification carries the accept/decline actions and any clipboard content that arrived, because Android 10+ ignores a background clipboard write without saying so.
-- `v2/V2Activity.kt` — the second launcher entry.
+- `v2/PrivilegeKeystore.kt` — M6's tier 1 (D-21, D-61). The Android Keystore will never export key material, and the Go core needs 32 raw bytes to open the Appendix A container, so the Keystore key *wraps* a key-encryption key instead: sealed with an AES-GCM key created with `setUserAuthenticationRequired(true)` and a six-hour validity window, and only the sealed blob is stored. The six hours are then enforced by the platform rather than by a timer in this process. Changing the screen lock invalidates the key permanently; the shell says owned access must be set up again rather than retrying, and pairings survive because they ride the identity key (D-20).
+- `v2/V2Activity.kt` — the second launcher entry, and `CredentialGate`: only an activity can launch the system credential prompt, so the view model asks for one through a flow and the activity runs it.
 - `build-aar.sh` — builds `app/libs/openair.aar` from `mobile/`. The .aar is build output and is **not** in VCS; run this after a fresh clone and after any change under `mobile/` or `internal/`.
 
 v1 app (Kotlin sockets, unchanged):

@@ -66,6 +66,7 @@ fun V2Screen(vm: V2ViewModel = viewModel()) {
             ReceiveControls(state, vm)
             Files(state, onPick = { pickFile.launch(arrayOf("*/*")) }, onClear = vm::clearFiles)
             ClipboardControls(state, vm)
+            OwnedAccess(state, vm)
             PairingControls(state, vm)
             Devices(state, vm)
             if (state.status.isNotEmpty()) {
@@ -285,6 +286,20 @@ private fun DeviceCard(d: DeviceRow, vm: V2ViewModel) {
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (d.paired) {
+                // What this device may do, and whether it may do it right now.
+                // Two different things: "owned" is a standing grant, "unlocked"
+                // is the six-hour session that makes it usable (D-18, D-30).
+                Text(
+                    when {
+                        d.owned && d.unlockedUntil == -1L -> "owned · always-on"
+                        d.owned && d.unlocked -> "owned · unlocked"
+                        d.owned -> "owned · locked"
+                        else -> "trusted"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (d.paired) {
                     Button(onClick = { vm.sendTo(d) }) { Text("Send") }
@@ -294,6 +309,58 @@ private fun DeviceCard(d: DeviceRow, vm: V2ViewModel) {
                     // Discovery found it, but nothing has authenticated it. A
                     // transfer would be refused at both ends until it is paired.
                     Text("not paired", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (d.paired) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (d.owned) {
+                        // Unlocking is what lets this phone reach that device
+                        // unattended for six hours. It asks for the screen lock,
+                        // and the prompt names the device it authorises.
+                        OutlinedButton(onClick = { vm.unlock(d) }) {
+                            Text(if (d.unlocked) "Extend unlock" else "Unlock")
+                        }
+                        OutlinedButton(onClick = { vm.setOwned(d, false) }) { Text("Withdraw owned") }
+                    } else {
+                        OutlinedButton(onClick = { vm.setOwned(d, true) }) { Text("Allow unattended") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * OwnedAccess is the device-wide half of M6: whether this phone has a privilege
+ * key at all, and the one button that ends every session.
+ *
+ * Tier 3 is stated rather than hidden (D-21). A user who believes they have
+ * unattended access and does not is worse off than one who was told they do not.
+ */
+@Composable
+private fun OwnedAccess(state: V2UiState, vm: V2ViewModel) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Owned access", style = MaterialTheme.typography.titleSmall)
+            Text(
+                when {
+                    state.needsScreenLock ->
+                        "This phone has no screen lock, so it cannot protect a privilege key. " +
+                            "Pairing, transfers and clipboard still work."
+                    state.protectionTier == 2 -> "Privilege key held by the Android Keystore, released after your screen lock."
+                    state.protectionTier == 1 -> "Privilege key sealed with a passphrase."
+                    else ->
+                        "No privilege key yet. Set one up to let a paired device act while this " +
+                            "phone is in your pocket; without it, someone has to approve each transfer."
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.protectionTier == 0 && !state.needsScreenLock) {
+                    Button(onClick = vm::protect) { Text("Set up") }
+                }
+                if (state.protectionTier != 0) {
+                    OutlinedButton(onClick = vm::lockAll) { Text("Lock everything") }
                 }
             }
         }

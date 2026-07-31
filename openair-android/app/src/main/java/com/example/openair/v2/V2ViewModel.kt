@@ -28,7 +28,14 @@ data class DeviceRow(
     val addr: String,
     val via: String,
     val paired: Boolean,
-)
+    /** 0 unpaired, 1 trusted, 2 owned (PROTOCOL.md §6). */
+    val level: Int = 0,
+    /** 0 locked, -1 always-on, otherwise the unix millisecond expiry. */
+    val unlockedUntil: Long = 0,
+) {
+    val owned: Boolean get() = level >= 2
+    val unlocked: Boolean get() = unlockedUntil != 0L
+}
 
 /** A file the user picked to send. */
 data class PickedFile(val name: String, val path: String, val bytes: Long)
@@ -75,6 +82,9 @@ data class V2UiState(
     val offerPrompt: OfferPrompt? = null,
     val sending: TransferState = TransferState(),
     val incoming: TransferState = TransferState(),
+    /** D-21's tier for this device: 0 none, 1 passphrase, 2 keystore. */
+    val protectionTier: Int = 0,
+    val needsScreenLock: Boolean = false,
     val clipboardText: String = "",
     val lastClipboard: String = "",
     val lastClipboardFrom: String = "",
@@ -105,6 +115,8 @@ class V2ViewModel(app: Application) : AndroidViewModel(app) {
                 displayName = android.os.Build.MODEL ?: "android",
                 destination = repo.destination,
                 pairedCount = repo.pairedCount(),
+                protectionTier = repo.identity.protectionTier().toInt(),
+                needsScreenLock = !PrivilegeKeystore.isDeviceSecure(app),
                 status = "ready",
             )
         }
@@ -270,6 +282,142 @@ class V2ViewModel(app: Application) : AndroidViewModel(app) {
     fun unpair(deviceId: String) {
         runCatching { repo.unpair(deviceId) }
         _state.update { it.copy(pairedCount = repo.pairedCount(), status = "unpaired") }
+    }
+
+    // ── owned access (M6) ─────────────────────────────────────────────────────
+
+    /**
+     * Set when the platform wants the user to authenticate before it will
+     * release the key-encryption key. The activity watches this, runs the
+     * device-credential prompt, and calls [onAuthenticated].
+     *
+     * It is a request rather than a call because only an Activity can launch the
+     * credential intent, and a view model that held one would leak it.
+     */
+    private val _authNeeded = MutableStateFlow(false)
+    val authNeeded: StateFlow<Boolean> = _authNeeded.asStateFlow()
+
+    private var pendingAuthAction: (() -> Unit)? = null
+
+    /**
+     * Creates this device's privilege key, sealed by the Android Keystore
+     * (D-21 tier 1). One-time, and the credential prompt is part of it: the
+     * Keystore will not use a user-authentication key before the user has
+     * authenticated, which is the property being bought.
+     */
+    fun protect() {
+        if (!PrivilegeKeystore.isDeviceSecure(getApplication())) {
+            _state.update {
+                it.copy(status = "set a screen lock first: without one this device cannot protect a privilege key")
+            }
+            return
+        }
+        withAuthentication {
+            val kek = PrivilegeKeystore.createKek(getApplication())
+            repo.identity.protect(kek)
+            java.util.Arrays.fill(kek, 0)
+            _state.update {
+                it.copy(
+                    protectionTier = repo.identity.protectionTier().toInt(),
+                    status = "owned access set up; pair your devices again so they learn this key",
+                )
+            }
+        }
+    }
+
+    /**
+     * Starts a six-hour owned session for one device (D-18, D-30).
+     *
+     * Per device, not per app: the confirmation the user just gave names the
+     * machine it authorises, and reaching a second one asks again.
+     */
+    fun unlock(device: DeviceRow) {
+        withAuthentication {
+            val kek = PrivilegeKeystore.unlockKek(getApplication())
+            val expiry = repo.identity.unlock(device.deviceId, kek, "", false, 0L)
+            java.util.Arrays.fill(kek, 0)
+            _state.update {
+                it.copy(status = if (expiry == 0L) "${device.displayName} unlocked" else "${device.displayName} unlocked for six hours")
+            }
+            refreshTrust()
+        }
+    }
+
+    /** Ends every owned session and wipes the decrypted key. */
+    fun lockAll() {
+        repo.identity.lock()
+        _state.update { it.copy(status = "owned access locked") }
+        refreshTrust()
+    }
+
+    /**
+     * Grants or withdraws a paired device's unattended access (§6.4).
+     *
+     * A local act on this device, never a response to a request: a peer cannot
+     * ask to be promoted (PRD R3).
+     */
+    fun setOwned(device: DeviceRow, owned: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { repo.identity.setOwned(device.deviceId, owned) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(status = if (owned) "${device.displayName} can now act unattended" else "${device.displayName} is trusted only")
+                    }
+                    refreshTrust()
+                }
+                .onFailure { e -> _state.update { it.copy(status = e.message ?: "could not change trust level") } }
+        }
+    }
+
+    /** Called by the activity once the credential prompt has finished. */
+    fun onAuthenticated(ok: Boolean) {
+        val action = pendingAuthAction
+        pendingAuthAction = null
+        _authNeeded.value = false
+        if (!ok) {
+            _state.update { it.copy(status = "not unlocked: authentication was cancelled") }
+            return
+        }
+        action?.let { run(it) }
+    }
+
+    /**
+     * Runs a block that needs the Keystore, deferring it behind a credential
+     * prompt when the platform says the user must authenticate first.
+     */
+    private fun withAuthentication(block: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) { run(block) }
+    }
+
+    private fun run(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: PrivilegeKeystore.NeedsAuthentication) {
+            pendingAuthAction = block
+            _authNeeded.value = true
+        } catch (e: PrivilegeKeystore.NeedsReprotect) {
+            // The screen lock changed, so the Keystore key is gone and the
+            // sealed privilege key can no longer be opened by anyone, including
+            // us. Say so rather than retrying: the way out is to set owned
+            // access up again.
+            _state.update { it.copy(status = e.message ?: "owned access must be set up again") }
+        } catch (e: Exception) {
+            _state.update { it.copy(status = e.message ?: "owned access failed") }
+        }
+    }
+
+    /** Re-reads trust level and unlock state for the devices on screen. */
+    private fun refreshTrust() {
+        _state.update { st ->
+            st.copy(
+                devices = st.devices.map { row ->
+                    if (!row.paired) row else row.copy(
+                        level = repo.identity.trustLevel(row.deviceId).toInt(),
+                        unlockedUntil = repo.identity.unlockedUntil(row.deviceId),
+                    )
+                },
+            )
+        }
     }
 
     // ── sending ───────────────────────────────────────────────────────────────

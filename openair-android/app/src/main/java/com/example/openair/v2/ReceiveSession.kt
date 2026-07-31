@@ -149,15 +149,24 @@ object ReceiveSession {
     /** Reads the current candidate set. Blocking; call it off the main thread. */
     fun peers(): List<DeviceRow> {
         val d = discovery ?: return emptyList()
+        val identity = appContext?.let { CoreRepository.get(it).identity }
         val list = d.peers()
         return (0 until list.len().toInt()).map { i ->
+            val deviceId = list.deviceID(i.toLong())
+            val paired = list.paired(i.toLong())
             DeviceRow(
-                deviceId = list.deviceID(i.toLong()),
+                deviceId = deviceId,
                 fingerprint = list.fingerprint(i.toLong()),
                 displayName = list.displayName(i.toLong()),
                 addr = list.addr(i.toLong()),
                 via = list.via(i.toLong()),
-                paired = list.paired(i.toLong()),
+                paired = paired,
+                // Trust level and unlock state are read here rather than in the
+                // UI because both are the core's answer, not the shell's: what a
+                // device may do is trust-store state, and whether it is unlocked
+                // right now is a six-hour timer inside Go (§6, D-30).
+                level = if (paired && identity != null) identity.trustLevel(deviceId).toInt() else 0,
+                unlockedUntil = if (paired && identity != null) identity.unlockedUntil(deviceId) else 0L,
             )
         }
     }

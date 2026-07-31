@@ -113,7 +113,7 @@ func (p *Pairing) ShowOffer(listenAddr string) (string, error) {
 	}
 
 	ln, err := conn.Listen(listenAddr, p.id.impl, p.displayName, PlatformName,
-		map[byte]session.Handler{0: h}, h.Authorize)
+		map[byte]session.Handler{0: h}, conn.ListenOptions{Authorize: h.Authorize})
 	if err != nil {
 		return "", err
 	}

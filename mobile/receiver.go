@@ -149,7 +149,14 @@ func (r *Receiver) Start(listenAddr string) error {
 
 	cap := files.New(files.Config{
 		DestRoot: r.destRoot,
-		Accept: func(_ context.Context, peer identity.Peer, offer files.Offer) (bool, error) {
+		Accept: func(ctx context.Context, peer identity.Peer, offer files.Offer) (bool, error) {
+			// Unattended acceptance, M6's point: an Owned peer that proved
+			// possession of its privilege key for this offer does not need the
+			// phone unlocked and a human looking at it (§6, PRD R3). The proof
+			// was verified by the session layer before this call.
+			if peer.Level == identity.LevelOwned && session.OwnedFromContext(ctx) {
+				return true, nil
+			}
 			v := r.offerVerifier()
 			if v == nil {
 				return false, nil
@@ -216,8 +223,8 @@ func (r *Receiver) Start(listenAddr string) error {
 		handlers[clipboard.CapID] = c.capability()
 	}
 
-	ln, err := conn.Listen(listenAddr, r.id.impl, r.displayName, PlatformName,
-		handlers, authorize)
+	ln, err := conn.Listen(listenAddr, r.id.impl, r.displayName, PlatformName, handlers,
+		conn.ListenOptions{Authorize: authorize, PeerLookup: r.id.store.Get})
 	if err != nil {
 		return err
 	}
