@@ -2,17 +2,21 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/shreyashsri79/openair/internal/conn"
+	"github.com/shreyashsri79/openair/internal/daemon"
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/pairing"
 	"github.com/shreyashsri79/openair/internal/session"
+	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
 )
 
 type pairOptions struct {
@@ -20,6 +24,9 @@ type pairOptions struct {
 	offer  string // non-empty: an offer that was scanned or typed here
 	addr   string // override the address to dial; otherwise the offer's hint
 	keys   string
+
+	socket   string
+	noDaemon bool
 
 	onReady func(addr, offer string) // used by tests
 }
@@ -31,6 +38,8 @@ func runPair(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.StringVar(&o.listen, "listen", "", "display an offer and wait on this address (e.g. :9000)")
 	fs.StringVar(&o.addr, "addr", "", "address to dial, overriding the offer's own hint")
 	fs.StringVar(&o.keys, "keys", "", "directory holding this device's keys")
+	fs.StringVar(&o.socket, "socket", "", "daemon IPC socket path")
+	fs.BoolVar(&o.noDaemon, "no-daemon", false, "pair from this process instead of asking the daemon")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -38,21 +47,97 @@ func runPair(args []string, stdin io.Reader, stdout io.Writer) error {
 		o.offer = rest[0]
 	}
 
-	switch {
-	case o.listen != "" && o.offer != "":
+	if o.listen != "" && o.offer != "" {
 		return fmt.Errorf("give either --listen or an offer to scan, not both")
-	case o.listen == "" && o.offer == "":
-		return fmt.Errorf("usage: openair pair --listen ADDR   (on one device)\n" +
-			"       openair pair OFFER          (on the other)")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// With a daemon running, bare `openair pair` is the displaying side: the
+	// daemon already has a listener, so there is no address for the user to
+	// choose. Direct mode has no listener until --listen says where to bind,
+	// which is why the requirement returns below.
+	if !o.noDaemon {
+		err := pairViaDaemon(ctx, o, stdin, stdout)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, daemon.ErrNoDaemon) {
+			return err
+		}
+		fmt.Fprintln(stdout, "no daemon running; pairing from this process")
+	}
+
+	if o.listen == "" && o.offer == "" {
+		return fmt.Errorf("no daemon is running, so this needs an address to listen on\n" +
+			"usage: openair pair --listen ADDR   (on one device)\n" +
+			"       openair pair OFFER          (on the other)")
+	}
+
 	if o.listen != "" {
 		return pairListen(ctx, o, stdin, stdout)
 	}
 	return pairScan(ctx, o, stdin, stdout)
+}
+
+// pairViaDaemon runs §5 in the daemon, which is where it belongs once one is
+// running: the daemon owns the identity being pinned and the listener the peer
+// dials, and a second process pairing on its behalf would pin the peer into a
+// trust store the daemon is holding open.
+//
+// --listen is ignored in this mode and says so. The daemon already has a
+// listener; asking it to bind a second one would advertise an address that
+// stops existing when this command exits.
+func pairViaDaemon(ctx context.Context, o pairOptions, stdin io.Reader, stdout io.Writer) error {
+	var mu sync.Mutex
+
+	// The offer has to reach the user before pairing finishes -- it is what
+	// they carry to the other device -- so the daemon sends it as an event
+	// rather than in the reply. An event with no DeviceID is that offer.
+	onEvent := func(ev *openairv1.DaemonEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		if ev.GetKind() == openairv1.DaemonEventKind_DAEMON_EVENT_KIND_PAIRED && ev.GetDeviceId() == "" {
+			grouped := groupOffer(ev.GetText())
+			fmt.Fprintf(stdout, "\nscan or type this on the other device:\n\n  %s\n\n", ev.GetText())
+			fmt.Fprintf(stdout, "  (by hand: %s)\n\nwaiting for the other device...\n", grouped)
+			return
+		}
+		if line := formatEvent(ev); line != "" {
+			fmt.Fprintln(stdout, line)
+		}
+	}
+	// Prompts, because §5.2's six digits have to reach a human and this
+	// terminal is the human. Without them the daemon has nobody to ask and
+	// refuses its own pairing.
+	onPrompt := func(p *openairv1.DaemonPrompt) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return askPrompt(stdin, stdout, p)
+	}
+
+	c, err := daemon.Connect(ctx, o.socket, onEvent, onPrompt)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if err := c.Subscribe(ctx, true); err != nil {
+		return err
+	}
+	if o.listen != "" {
+		fmt.Fprintln(stdout, "the daemon is already listening; --listen is ignored")
+	}
+
+	resp, err := c.Pair(ctx, o.offer, 0)
+	if err != nil {
+		return fmt.Errorf("pairing: %w", err)
+	}
+	fmt.Fprintf(stdout, "\npaired with %s -- %s\n",
+		identity.DeviceID(resp.GetDeviceId()).Fingerprint(), resp.GetDisplayName())
+	fmt.Fprintln(stdout, "transfers between these two devices no longer need a fingerprint check.")
+	return nil
 }
 
 // pairListen is device A in PROTOCOL.md §5.1: it displays the offer and waits.

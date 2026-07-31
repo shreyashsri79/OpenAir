@@ -1021,9 +1021,17 @@ ciphertext   ct_len bytes       sealed Ed25519 private key
 | 4 | `notifications` | 3 | Specified — §12 |
 | 5 | `input` | 4 | Specified — §13 |
 | 6 | `mirror` | 4 | **Provisional** — §14, pending D-9 |
+| 7 | `daemon` | 1 | **Local IPC only** — never on a network session (D-51) |
 
-IDs 7–127 are reserved for future core capabilities. 128–255 are available for
+IDs 8–127 are reserved for future core capabilities. 128–255 are available for
 experiments and MUST NOT appear in a release.
+
+`daemon` is in this table because the local link between `openaird` and its
+shells carries the same envelope as the network protocol (D-29), so its capID
+has to be reserved against a future network capability taking it. It never
+travels between devices: a peer sending capID 7 over QUIC reaches no registered
+handler and is ignored under §3.1. Its messages are in
+`proto/openair/v1/daemon.proto` and are not part of the interoperable protocol.
 
 ---
 

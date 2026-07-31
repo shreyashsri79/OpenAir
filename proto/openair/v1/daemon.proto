@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package openair.v1;
+
+import "openair/v1/clipboard.proto";
+import "openair/v1/common.proto";
+
+option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
+
+// The daemon control plane (capID 7). These messages never travel between
+// devices: they are what a local shell -- the CLI, a tray UI -- says to
+// `openaird` over a unix socket or named pipe. D-29 reuses the session envelope
+// (PROTOCOL.md §3) for that link rather than adding gRPC, so this file is the
+// message set that envelope carries, and nothing else changes.
+//
+// The envelope has no request ID, so every request and every response carries
+// one: the initiator allocates, the responder echoes. Prompts run the other way
+// -- the daemon asks a subscribed client -- and are correlated the same way in
+// their own namespace, which is unambiguous because the message type already
+// says which direction a frame is travelling.
+enum DaemonMessageType {
+  DAEMON_MESSAGE_TYPE_UNSPECIFIED = 0;
+  DAEMON_MESSAGE_TYPE_STATUS_REQUEST = 1;
+  DAEMON_MESSAGE_TYPE_STATUS_RESPONSE = 2;
+  DAEMON_MESSAGE_TYPE_DEVICE_LIST_REQUEST = 3;
+  DAEMON_MESSAGE_TYPE_DEVICE_LIST_RESPONSE = 4;
+  DAEMON_MESSAGE_TYPE_SEND_REQUEST = 5;
+  DAEMON_MESSAGE_TYPE_SEND_RESPONSE = 6;
+  DAEMON_MESSAGE_TYPE_PAIR_REQUEST = 7;
+  DAEMON_MESSAGE_TYPE_PAIR_RESPONSE = 8;
+  DAEMON_MESSAGE_TYPE_SUBSCRIBE_REQUEST = 9;
+  DAEMON_MESSAGE_TYPE_SUBSCRIBE_RESPONSE = 10;
+  DAEMON_MESSAGE_TYPE_EVENT = 11;
+  DAEMON_MESSAGE_TYPE_PROMPT = 12;
+  DAEMON_MESSAGE_TYPE_PROMPT_RESPONSE = 13;
+  DAEMON_MESSAGE_TYPE_CLIPBOARD_REQUEST = 14;
+  DAEMON_MESSAGE_TYPE_CLIPBOARD_RESPONSE = 15;
+  DAEMON_MESSAGE_TYPE_ERROR = 16;
+}
+
+// DaemonStatusRequest asks what the daemon is and what it is doing.
+message DaemonStatusRequest {
+  uint64 request_id = 1;
+}
+
+message DaemonStatusResponse {
+  uint64 request_id = 1;
+  string device_id = 2;
+  string display_name = 3;
+  string platform = 4;
+  string listen_addr = 5;  // the QUIC address actually bound
+  string dest_dir = 6;     // where inbound files land
+  int64 started_unix = 7;
+  uint32 paired_devices = 8;
+  uint32 active_sessions = 9;
+  bool announcing = 10;  // advertising on the LAN (M3)
+  bool auto_accept = 11;  // inbound transfers accepted without a prompt
+  uint32 subscribers = 12;  // clients currently able to answer a prompt
+}
+
+// DaemonDeviceListRequest lists what the daemon can see: paired devices from
+// the trust store, and unpaired ones discovery has heard from.
+message DaemonDeviceListRequest {
+  uint64 request_id = 1;
+  bool paired_only = 2;
+}
+
+message DaemonDevice {
+  string device_id = 1;
+  string display_name = 2;
+  string platform = 3;
+  repeated string addrs = 4;  // discovery candidates; empty if not seen
+  bool paired = 5;
+  TrustLevel level = 6;
+  bool session_open = 7;
+}
+
+message DaemonDeviceListResponse {
+  uint64 request_id = 1;
+  repeated DaemonDevice devices = 2;
+}
+
+// DaemonSendRequest offers local files to a device, named or at an explicit
+// host:port. The response returns once the transfer completes, because a CLI
+// that returns early cannot report a digest mismatch.
+message DaemonSendRequest {
+  uint64 request_id = 1;
+  string target = 2;  // device name, DeviceID prefix, or host:port
+  repeated string paths = 3;
+}
+
+message DaemonSendResponse {
+  uint64 request_id = 1;
+  string transfer_id = 2;
+  string device_id = 3;
+}
+
+// DaemonPairRequest runs PROTOCOL.md §5 through the daemon. An empty offer
+// means "display ours and wait"; a non-empty one means "consume this". Either
+// way the six digits come back to the client as a prompt, because §5.2 forbids
+// a path that does not show them.
+message DaemonPairRequest {
+  uint64 request_id = 1;
+  string offer = 2;
+  int64 timeout_ms = 3;
+}
+
+message DaemonPairResponse {
+  uint64 request_id = 1;
+  string offer = 2;  // set on the displaying side, before the peer arrives
+  string device_id = 3;
+  string display_name = 4;
+}
+
+// DaemonSubscribeRequest turns this connection into an event sink. A client
+// that also answers prompts is what lets the daemon ask a human about an
+// inbound transfer; with no such client, daemon policy decides alone.
+message DaemonSubscribeRequest {
+  uint64 request_id = 1;
+  bool prompts = 2;
+}
+
+message DaemonSubscribeResponse {
+  uint64 request_id = 1;
+}
+
+enum DaemonEventKind {
+  DAEMON_EVENT_KIND_UNSPECIFIED = 0;
+  DAEMON_EVENT_KIND_DEVICE_FOUND = 1;
+  DAEMON_EVENT_KIND_DEVICE_LOST = 2;
+  DAEMON_EVENT_KIND_SESSION_OPEN = 3;
+  DAEMON_EVENT_KIND_SESSION_CLOSED = 4;
+  DAEMON_EVENT_KIND_TRANSFER_STARTED = 5;
+  DAEMON_EVENT_KIND_TRANSFER_PROGRESS = 6;
+  DAEMON_EVENT_KIND_TRANSFER_DONE = 7;
+  DAEMON_EVENT_KIND_PAIRED = 8;
+  DAEMON_EVENT_KIND_REFUSED = 9;
+  DAEMON_EVENT_KIND_CLIPBOARD = 10;
+}
+
+// DaemonEvent is unsolicited: request_id is the request it belongs to when one
+// asked for it, and zero otherwise.
+message DaemonEvent {
+  uint64 request_id = 1;
+  DaemonEventKind kind = 2;
+  string text = 3;
+  string device_id = 4;
+  string transfer_id = 5;
+  uint64 bytes_done = 6;
+  uint64 bytes_total = 7;
+  bool ok = 8;
+}
+
+enum DaemonPromptKind {
+  DAEMON_PROMPT_KIND_UNSPECIFIED = 0;
+  DAEMON_PROMPT_KIND_PAIR_SAS = 1;      // compare six digits (§5.2)
+  DAEMON_PROMPT_KIND_ACCEPT_TRANSFER = 2;
+}
+
+// DaemonPrompt travels daemon -> client and requires an answer. request_id is
+// allocated by the daemon.
+message DaemonPrompt {
+  uint64 request_id = 1;
+  DaemonPromptKind kind = 2;
+  string text = 3;
+  string device_id = 4;
+  string display_name = 5;
+  string platform = 6;
+  string sas = 7;                // PAIR_SAS only
+  repeated string files = 8;     // ACCEPT_TRANSFER only
+  uint64 total_bytes = 9;
+}
+
+message DaemonPromptResponse {
+  uint64 request_id = 1;
+  bool approve = 2;
+}
+
+// DaemonClipboardRequest carries the network message verbatim (§9). That is the
+// point of D-29: a tray UI pushing the clipboard emits the same bytes the wire
+// carries, so there is no translation layer to keep in sync.
+message DaemonClipboardRequest {
+  uint64 request_id = 1;
+  string target = 2;
+  ClipboardPush push = 3;
+}
+
+message DaemonClipboardResponse {
+  uint64 request_id = 1;
+}
+
+// DaemonError is the failure reply to any request. code is a PROTOCOL.md §10
+// value where one applies and zero where the failure is local.
+message DaemonError {
+  uint64 request_id = 1;
+  uint32 code = 2;
+  string message = 3;
+}

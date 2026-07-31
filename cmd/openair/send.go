@@ -12,6 +12,7 @@ import (
 
 	"github.com/shreyashsri79/openair/internal/caps/files"
 	"github.com/shreyashsri79/openair/internal/conn"
+	"github.com/shreyashsri79/openair/internal/daemon"
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/session"
 )
@@ -27,6 +28,11 @@ type sendOptions struct {
 	keys    string
 	timeout time.Duration // how long to look for a named device; zero means 5s
 
+	// socket is the daemon to drive; empty means the platform default.
+	// noDaemon forces this process to dial for itself even when one is running.
+	socket   string
+	noDaemon bool
+
 	disco discoveryOptions // test-only; see discoveryOptions
 }
 
@@ -36,6 +42,8 @@ func runSend(args []string, stdin io.Reader, stdout io.Writer) error {
 	var o sendOptions
 	fs.StringVar(&o.keys, "keys", "", "directory holding this device's keys")
 	fs.DurationVar(&o.timeout, "timeout", 5*time.Second, "how long to look for a named device on the network")
+	fs.StringVar(&o.socket, "socket", "", "daemon IPC socket path")
+	fs.BoolVar(&o.noDaemon, "no-daemon", false, "dial from this process instead of asking the daemon")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -49,7 +57,53 @@ func runSend(args []string, stdin io.Reader, stdout io.Writer) error {
 	return send(context.Background(), o, stdin, stdout)
 }
 
+// send offers files, through the daemon when one is running.
+//
+// The fallback is not a convenience: a daemon holds this device's identity and
+// its open sessions, so sending around it would dial a second connection from a
+// second copy of the same identity. Direct mode exists for the machine that has
+// no daemon, and saying which mode is in use matters because the two write
+// their received files to different places.
 func send(ctx context.Context, o sendOptions, stdin io.Reader, stdout io.Writer) error {
+	if !o.noDaemon {
+		err := sendViaDaemon(ctx, o, stdout)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, daemon.ErrNoDaemon) {
+			return err
+		}
+		fmt.Fprintln(stdout, "no daemon running; dialling from this process")
+	}
+	return sendDirect(ctx, o, stdin, stdout)
+}
+
+// sendViaDaemon hands the whole transfer to the daemon and prints what it
+// reports back.
+func sendViaDaemon(ctx context.Context, o sendOptions, stdout io.Writer) error {
+	c, err := connectDaemon(ctx, o.socket, nil, stdout, false)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	// Events, but no prompts: sending asks this side no questions, and
+	// subscribing for prompts would make the daemon route an inbound transfer's
+	// approval to a command that is about to exit.
+	if err := c.Subscribe(ctx, false); err != nil {
+		return err
+	}
+
+	resp, err := c.Send(ctx, o.addr, o.paths)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "transfer %s to %s complete\n",
+		resp.GetTransferId(), identity.DeviceID(resp.GetDeviceId()).Fingerprint())
+	return nil
+}
+
+func sendDirect(ctx context.Context, o sendOptions, stdin io.Reader, stdout io.Writer) error {
 	id, err := loadIdentity(o.keys)
 	if err != nil {
 		return err

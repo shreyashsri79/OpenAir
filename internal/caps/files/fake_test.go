@@ -200,6 +200,9 @@ func (s *fakeSession) Quiesce(context.Context, uint32, string) (func(), error) {
 }
 func (s *fakeSession) Close(uint16, string) error { return nil }
 
+// Done never fires: a fake session ends when the test does.
+func (s *fakeSession) Done() <-chan struct{} { return nil }
+
 func (s *fakeSession) Send(ctx context.Context, capID byte, msgType uint16, msg proto.Message) error {
 	b, err := proto.Marshal(msg)
 	if err != nil {

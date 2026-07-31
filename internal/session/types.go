@@ -73,6 +73,16 @@ type Session interface {
 	Quiesce(ctx context.Context, floorBytesPerSec uint32, reason string) (release func(), err error)
 
 	Close(code uint16, reason string) error
+
+	// Done is closed when the session ends, however it ended: a local Close, a
+	// peer that closed the control stream, or a protocol error that killed it.
+	//
+	// It exists for M4. A daemon holds many sessions at once and has to know
+	// when one is gone -- to drop it from the device list, and to stop holding
+	// a reference to a connection that no longer exists. Without this the only
+	// way to find out is to send something and see it fail, which turns every
+	// stale entry into a failed user action.
+	Done() <-chan struct{}
 }
 
 // Handler is what the session layer dispatches an inbound message to, once it

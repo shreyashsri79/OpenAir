@@ -2,6 +2,10 @@ package conn
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
 
 	"github.com/apernet/quic-go"
 
@@ -9,6 +13,41 @@ import (
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/session"
 )
+
+// maxPendingHandshakes bounds how many inbound connections may be between the
+// QUIC handshake and a completed Hello at once.
+//
+// It is a memory bound, not a throughput one: each pending handshake holds an
+// accepted connection and a goroutine, and an attacker who can complete QUIC
+// handshakes and then say nothing would otherwise accumulate both without
+// limit. Past the bound, new connections wait in the kernel until a slot frees
+// or their own idle timeout fires.
+const maxPendingHandshakes = 32
+
+// handshakeTimeout bounds one inbound peer's Hello exchange (PROTOCOL.md §4).
+//
+// A peer that completes the QUIC handshake and then sends nothing is either
+// broken or probing; either way it must not hold a slot until quic-go's much
+// longer idle timeout expires.
+const handshakeTimeout = 10 * time.Second
+
+// HandshakeError is one inbound connection that did not become a session --
+// a refused peer, a key mismatch, a Hello that never arrived.
+//
+// It is a distinct type because it is not fatal to the listener: a daemon that
+// stops accepting because one peer was refused has been denied service by any
+// stranger who can reach its port. Callers that treat every Accept error as
+// terminal are the reason this is worth naming.
+type HandshakeError struct {
+	Remote string
+	Err    error
+}
+
+func (e *HandshakeError) Error() string {
+	return fmt.Sprintf("handshake with %s: %v", e.Remote, e.Err)
+}
+
+func (e *HandshakeError) Unwrap() error { return e.Err }
 
 // listener is the Phase 1 implementation of Listener: it accepts inbound
 // QUIC connections on one bound address and hands each to session.New.
@@ -22,6 +61,11 @@ import (
 //
 // A nil authorize admits every caller. See session.Config.Authorize: that is
 // M1's stated scope and not a permanent arrangement.
+//
+// Hello runs on its own goroutine per connection, not on the accept path. That
+// is M4's requirement rather than a refinement: the daemon has no second
+// process to fall back on, and with an inline Hello one peer that connects and
+// stays silent stops every other device from reaching this one.
 type listener struct {
 	ln          *quic.Listener
 	local       identity.Identity
@@ -29,6 +73,17 @@ type listener struct {
 	platform    string
 	handlers    map[byte]session.Handler
 	authorize   func(identity.Peer) error
+
+	start   sync.Once
+	results chan acceptResult
+	ctx     context.Context
+	cancel  context.CancelFunc
+	slots   chan struct{}
+}
+
+type acceptResult struct {
+	sess session.Session
+	err  error
 }
 
 // Listen binds addr (use ":0" for an ephemeral port) and returns a Listener
@@ -49,6 +104,7 @@ func Listen(addr string, local identity.Identity, displayName, platform string, 
 		return nil, err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &listener{
 		ln:          ln,
 		local:       local,
@@ -56,21 +112,72 @@ func Listen(addr string, local identity.Identity, displayName, platform string, 
 		platform:    platform,
 		handlers:    handlers,
 		authorize:   authorize,
+		results:     make(chan acceptResult),
+		ctx:         ctx,
+		cancel:      cancel,
+		slots:       make(chan struct{}, maxPendingHandshakes),
 	}, nil
 }
 
 // Accept waits for and returns the next inbound session.
+//
+// An error that is a *HandshakeError concerns one peer and leaves the listener
+// running; anything else is the listener itself failing and will repeat.
 func (l *listener) Accept(ctx context.Context) (session.Session, error) {
-	qc, err := l.ln.Accept(ctx)
-	if err != nil {
-		return nil, err
-	}
+	l.start.Do(func() { go l.pump() })
 
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-l.results:
+		return r.sess, r.err
+	case <-l.ctx.Done():
+		// Closed. The pump may be trying to deliver its own error at this
+		// moment; racing it would make Close's effect on a blocked Accept
+		// depend on which select won, so the closed listener answers here.
+		return nil, ErrListenerClosed
+	}
+}
+
+// ErrListenerClosed is what a blocked Accept returns once Close has been
+// called.
+var ErrListenerClosed = errors.New("conn: listener closed")
+
+// pump owns the QUIC accept loop for the life of the listener. It runs
+// independently of any caller's context so that a cancelled Accept does not
+// abandon a handshake already in progress.
+func (l *listener) pump() {
+	for {
+		qc, err := l.ln.Accept(l.ctx)
+		if err != nil {
+			l.deliver(acceptResult{err: err})
+			return
+		}
+
+		select {
+		case l.slots <- struct{}{}:
+		case <-l.ctx.Done():
+			qc.CloseWithError(quic.ApplicationErrorCode(session.CodeResourceExhausted), "shutting down")
+			return
+		}
+
+		go func() {
+			defer func() { <-l.slots }()
+			l.handshake(qc)
+		}()
+	}
+}
+
+// handshake completes Hello for one inbound connection and delivers the result.
+func (l *listener) handshake(qc *quic.Conn) {
 	// Same requirement as the dial side: install BBR only once the handshake
 	// (which Accept already waited for) has completed (D-14, D-16).
 	congestion.Use(qc)
 
-	return session.New(ctx, qc, session.Config{
+	ctx, cancel := context.WithTimeout(l.ctx, handshakeTimeout)
+	defer cancel()
+
+	sess, err := session.New(ctx, qc, session.Config{
 		Local:       l.local,
 		DisplayName: l.displayName,
 		Platform:    l.platform,
@@ -78,6 +185,28 @@ func (l *listener) Accept(ctx context.Context) (session.Session, error) {
 		Initiator:   false,
 		Authorize:   l.authorize,
 	})
+	if err != nil {
+		code := session.CodeProtocolViolation
+		if c, ok := session.ErrorCodeOf(err); ok {
+			code = c
+		}
+		qc.CloseWithError(quic.ApplicationErrorCode(code), code.String())
+		l.deliver(acceptResult{err: &HandshakeError{Remote: qc.RemoteAddr().String(), Err: err}})
+		return
+	}
+	l.deliver(acceptResult{sess: sess})
+}
+
+// deliver hands a result to whoever is in Accept, or drops it if the listener
+// is closing. A session nobody accepts is closed rather than leaked.
+func (l *listener) deliver(r acceptResult) {
+	select {
+	case l.results <- r:
+	case <-l.ctx.Done():
+		if r.sess != nil {
+			_ = r.sess.Close(uint16(session.CodeNoError), "listener closed")
+		}
+	}
 }
 
 // Addr reports the actual bound address, including the concrete port chosen
@@ -88,5 +217,6 @@ func (l *listener) Addr() string {
 
 // Close stops accepting new connections and unblocks any pending Accept.
 func (l *listener) Close() error {
+	l.cancel()
 	return l.ln.Close()
 }

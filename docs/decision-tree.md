@@ -60,6 +60,9 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-48 | — | May a process browse without announcing? | **accepted** — yes, `BrowseOnly` |
 | D-49 | ADR-5 | How does the Android shell reach the core? | **accepted** — `mobile/` façade, .aar not in VCS |
 | D-50 | ADR-8 | Is ADR-8 implemented, and on what base? | **written, unpublished, unmeasured** · corrects D-22, D-27 |
+| D-51 | — | What carries daemon IPC, concretely? | **accepted** — capID 7, `request_id` field 1 everywhere |
+| D-52 | — | Where does an inbound Hello run? | **accepted** — off the accept path; a refusal is not fatal |
+| D-53 | — | Who answers for an unattended daemon? | **accepted** — nobody watching means refused |
 
 **Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; the port has now landed (D-35, D-36), so what remains is comparing BBRv1 against D-17's Cubic baseline.
 
@@ -143,6 +146,16 @@ flowchart TD
     Q8 ==chosen==> D47["D-47 · mDNS `_openair._udp` (§15.1) plus a<br/>unicast UDP beacon (§15.2), whose byte layout<br/>the spec never defined and this does.<br/>Query plus announce, answered unicast,<br/>so discovery converges in one round trip"]:::accepted
     D47 --> D48["D-48 · a process with no listening port<br/>browses without announcing;<br/>announcing one anyway publishes an address<br/>that refuses every connection to it"]:::accepted
     D47 -.constrained by.-> D47N["a candidate is unauthenticated.<br/>Discovery never dials; the pinned-key<br/>handshake is what decides"]:::evidence
+
+    Q9{"D-29 / M4<br/>How does a shell drive the daemon?"}:::question
+    Q9 ==chosen==> D51["D-51 · the session envelope over a unix socket<br/>or named pipe, capID 7, local only.<br/>`request_id` is field 1 in every daemon message,<br/>which is what lets a reply be routed<br/>without knowing its type"]:::accepted
+    D51 --> D53["D-53 · with no client able to answer and no<br/>--accept-all, an inbound transfer is refused.<br/>A daemon that accepted files because nobody<br/>was watching is the worse default"]:::accepted
+    D51 -.rejected.-> R9A["gRPC, as HLD 2 first said<br/>a second codegen path and a large<br/>dependency for one local socket<br/>with a single trusted client"]:::rejected
+    D51 -.constrained by.-> D51N["the socket is a trust boundary:<br/>0700 dir, 0600 socket, SO_PEERCRED on Linux,<br/>owner-only pipe ACL on Windows"]:::evidence
+
+    Q10{"M4<br/>Where does an inbound Hello run?"}:::question
+    Q10 ==chosen==> D52["D-52 · on its own goroutine, bounded at 32,<br/>with a 10 s deadline. A refused peer becomes a<br/>HandshakeError, which does not end the loop"]:::accepted
+    Q10 -.rejected.-> R10A["inline on the accept path, as M1 had it<br/>one peer that connects and says nothing<br/>stops every other device from arriving"]:::rejected
 
     Q7{"ADR-6<br/>Keep consensus and replication?"}:::question
     Q7 ==chosen==> D11["D-11 · dropped<br/>every capability is a pairwise session;<br/>pairwise needs no agreement protocol"]:::accepted
@@ -986,3 +999,31 @@ Verified: both patches build and vet for `GOOS=windows`, every other platform st
 **Not verified, and this is the part that matters:** no Windows machine was involved. The new tests have never been executed — they are `//go:build windows` and were only type-checked. Nothing has measured whether the offload actually engages, and D-22 required a before-and-after number precisely so that "we believe it should be faster" could not stand in for a result. D-33's baseline (1450 Mb/s at one stream, 647 at four) is the "before"; the "after" does not exist yet. Until it does, ADR-8 is written, not done, and D-32's Phase 2 exit blocker for Windows is unchanged.
 
 Consequences: the immediate follow-up is a Windows session — run the fork's tests, then `oabench/winkit/`'s runbook against a patched build, and record the pair. Two things are worth watching when that happens. The 2.2x collapse from one stream to four (D-33 finding 2) is unexplained and may not be a send-path problem at all, in which case USO will not touch it. And the mutex above means a server socket shared by many connections now serialises its sends, so a multi-connection Windows server is the case most likely to regress rather than improve.
+
+## D-51: Daemon IPC is capID 7, and every daemon message carries `request_id` as field 1
+Date: 2026-07-31
+Status: accepted (implements D-29)
+Context: D-29 chose the session envelope over gRPC for the link between `openaird` and the shells that drive it, and left two things unstated that an implementation cannot avoid deciding. Which capID does a local-only control plane use, given that Appendix B's table is a *network* registry? And how is a reply matched to its request, given that the envelope has no correlation field and gRPC was the thing that would have supplied one?
+Decision: **capID 7**, added to Appendix B and to `CapabilityId` as `CAPABILITY_ID_DAEMON`, marked local-only. And **`request_id` as field 1 of every message in `daemon.proto`**, allocated by whichever side initiates, echoed by the responder.
+Rationale for the capID: the alternative was the 128–255 experimental range, which Appendix B says must not appear in a release — and this will. Taking a core ID reserves it against a future network capability colliding with it, which is exactly what the reserved range is for. It costs nothing on the network: a peer sending capID 7 over QUIC reaches no registered handler and is ignored under §3.1.
+Rationale for field 1: it makes the ID readable without unmarshalling. proto3 encodes field 1 first, so a set request ID is always tag `0x08` followed by a varint at the head of the payload, and the read loop can route a reply to its waiting caller without knowing which of fifteen message types it is holding. That removes a type switch from the hot path and, more importantly, removes the need for every message to implement a Go interface. `TestEveryDaemonMessageHasRequestIDFirst` enforces the invariant against the schema itself, because a future message numbering it differently would route every reply to request 0 and hang the caller rather than fail visibly.
+Alternatives considered: *a wrapper message with a oneof body* (rejected — it would make the local link's framing differ from the network's, which is the one thing D-29 chose this design to avoid). *A correlation ID in the envelope header* (rejected outright — the envelope is wire-visible and version-frozen; adding a field to it for the benefit of a local socket would change the network format for nothing).
+Consequences: two ID namespaces exist, because prompts travel daemon-to-client while requests travel client-to-daemon and both counters start at 1. They are kept in separate maps, keyed off the message type, and `TestPromptsAndRequestsDoNotCollide` is the proof. `DaemonDevice` has no `request_id` and is exempt from the invariant: it is a nested element, never an envelope payload.
+
+## D-52: An inbound Hello runs off the accept path, and a refused peer does not end the accept loop
+Date: 2026-07-31
+Status: accepted
+Context: `conn.Listener.Accept` ran the Hello exchange inline. The functionality map has recorded since M1 that this lets one peer which completes the QUIC handshake and then says nothing hold up the accept loop until the idle timeout, and that the daemon would need a real fix. The CLI worked around it by accepting in a background goroutine, which moves the stall rather than removing it. A second defect surfaced while wiring the daemon: `Accept` returned a rejected peer's error to its caller, and every caller treated an error as terminal — so a stranger connecting to a listening device stopped it listening.
+Decision: the listener owns a pump goroutine. It accepts QUIC connections and runs each Hello on its own goroutine, bounded at 32 in flight with a 10 s deadline each, delivering results to `Accept` through a channel. A handshake that fails is delivered as a `*conn.HandshakeError`, which the caller is expected to log and continue past; only a listener-level failure is terminal.
+Rationale: both failures are denial of service by anyone who can reach the port, and neither needs an attacker — a peer on a bad network produces the first and an unpaired device produces the second. The bound is a memory limit rather than a throughput one: each pending handshake holds a connection and a goroutine, and without a cap an attacker accumulates both.
+Alternatives considered: *unbounded handshake goroutines* (rejected — it trades a stall for an allocation attack). *Swallowing handshake failures inside the listener* (rejected — `internal/conn`'s own tests assert that a peer refused by the authorize callback surfaces as an error, and a listener that silently drops refusals gives an operator no way to see one).
+Consequences: `session.Session` gained `Done()`, closed when a session ends however it ended. The daemon needs it to drop dead sessions from its device list; without it the only way to notice is to send something and watch it fail, which turns every stale entry into a failed user action. `Accept` now returns `conn.ErrListenerClosed` after `Close`, rather than racing the pump's own error.
+
+## D-53: With nobody watching, an unattended daemon refuses
+Date: 2026-07-31
+Status: accepted
+Context: `openaird` receives files with no terminal attached. §8.1's accept decision and §5.2's six digits both need a human, and the daemon may have none: no tray UI, no `openair watch`, nothing subscribed to its socket.
+Decision: the daemon asks every subscribed client that offered to answer prompts and takes the **first answer**. No such client, or no answer within the timeout — 60 s for a transfer, 2 minutes for pairing — is a **refusal**. Accepting without a human requires `--accept-all`, stated at start-up.
+Rationale: the failure has to be the safe one. A daemon that accepted a transfer because nobody was looking would write a stranger's files to disk on the strength of an unattended socket; a daemon that refuses one costs the user a retry with `openair watch` running, and `openair status` says exactly that when it is the case. First answer rather than unanimity, because two open UIs are two views of one user and requiring agreement would hang on whichever one nobody is looking at.
+Alternatives considered: *queue the prompt until someone connects* (rejected — the peer is waiting on the other side of §8.2's accept, and a transfer that hangs for an hour is worse for both ends than one that is refused now). *Accept from Owned peers unattended* (deferred, not rejected — that is M6's unlock token and it does not exist yet; `files.Config`'s nil-Accept default already encodes it for when it does).
+Consequences: `--accept-all` is the headless posture and it is a real widening — any paired device may then write into the destination directory without asking. It is the honest way to express what a headless install is, and it is visible in `openair status` rather than implicit.

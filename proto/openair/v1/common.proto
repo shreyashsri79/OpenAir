@@ -19,6 +19,7 @@ enum CapabilityId {
   CAPABILITY_ID_NOTIFICATIONS = 5;  // wire 4
   CAPABILITY_ID_INPUT = 6;          // wire 5
   CAPABILITY_ID_MIRROR = 7;         // wire 6
+  CAPABILITY_ID_DAEMON = 8;         // wire 7 -- local IPC only, never on a network session (D-51)
 }
 
 // TrustLevel is the access level granted to a paired peer (PRD R3, D-20).

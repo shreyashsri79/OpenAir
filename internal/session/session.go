@@ -625,6 +625,8 @@ func (s *sess) Quiesce(ctx context.Context, floorBytesPerSec uint32, reason stri
 	return func() {}, nil
 }
 
+func (s *sess) Done() <-chan struct{} { return s.done }
+
 func (s *sess) Close(code uint16, reason string) error {
 	return s.closeWith(ErrorCode(code), reason, nil)
 }

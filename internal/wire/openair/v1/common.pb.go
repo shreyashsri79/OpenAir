@@ -38,6 +38,7 @@ const (
 	CapabilityId_CAPABILITY_ID_NOTIFICATIONS CapabilityId = 5 // wire 4
 	CapabilityId_CAPABILITY_ID_INPUT         CapabilityId = 6 // wire 5
 	CapabilityId_CAPABILITY_ID_MIRROR        CapabilityId = 7 // wire 6
+	CapabilityId_CAPABILITY_ID_DAEMON        CapabilityId = 8 // wire 7 -- local IPC only, never on a network session (D-51)
 )
 
 // Enum value maps for CapabilityId.
@@ -51,6 +52,7 @@ var (
 		5: "CAPABILITY_ID_NOTIFICATIONS",
 		6: "CAPABILITY_ID_INPUT",
 		7: "CAPABILITY_ID_MIRROR",
+		8: "CAPABILITY_ID_DAEMON",
 	}
 	CapabilityId_value = map[string]int32{
 		"CAPABILITY_ID_UNSPECIFIED":   0,
@@ -61,6 +63,7 @@ var (
 		"CAPABILITY_ID_NOTIFICATIONS": 5,
 		"CAPABILITY_ID_INPUT":         6,
 		"CAPABILITY_ID_MIRROR":        7,
+		"CAPABILITY_ID_DAEMON":        8,
 	}
 )
 
@@ -310,7 +313,7 @@ var File_openair_v1_common_proto protoreflect.FileDescriptor
 const file_openair_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"\x17openair/v1/common.proto\x12\n" +
-	"openair.v1*\xee\x01\n" +
+	"openair.v1*\x88\x02\n" +
 	"\fCapabilityId\x12\x1d\n" +
 	"\x19CAPABILITY_ID_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15CAPABILITY_ID_CONTROL\x10\x01\x12\x17\n" +
@@ -319,7 +322,8 @@ const file_openair_v1_common_proto_rawDesc = "" +
 	"\x16CAPABILITY_ID_REMOTEFS\x10\x04\x12\x1f\n" +
 	"\x1bCAPABILITY_ID_NOTIFICATIONS\x10\x05\x12\x17\n" +
 	"\x13CAPABILITY_ID_INPUT\x10\x06\x12\x18\n" +
-	"\x14CAPABILITY_ID_MIRROR\x10\a*s\n" +
+	"\x14CAPABILITY_ID_MIRROR\x10\a\x12\x18\n" +
+	"\x14CAPABILITY_ID_DAEMON\x10\b*s\n" +
 	"\n" +
 	"TrustLevel\x12\x1b\n" +
 	"\x17TRUST_LEVEL_UNSPECIFIED\x10\x00\x12\x18\n" +

@@ -1,3 +1,5 @@
+github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
+github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/apernet/quic-go v0.60.1-0.20260618182935-599b15a1fa26 h1:LTC+O+b5tux3RUzqqepNOkdMMI264O+mG09Y5j9Cf7Y=
 github.com/apernet/quic-go v0.60.1-0.20260618182935-599b15a1fa26/go.mod h1:B5eVtZG4ZkCvDZQNaOAAEZEtdBC7DIj56Q9EIb0mGAQ=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=

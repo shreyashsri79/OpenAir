@@ -190,52 +190,19 @@ func resolveTarget(ctx context.Context, d *discovery.Discovery, target string, o
 	}
 }
 
-// matchPeers finds candidates whose DeviceID or display name the user could
-// have meant. A DeviceID prefix counts: the fingerprint is printed in groups of
-// four and nobody wants to type sixteen characters.
+// matchPeers and isHostPort are discovery's, so that the daemon and this CLI
+// answer "which device did the user mean" identically. Two implementations of
+// that question would eventually disagree, and the failure would be a file
+// going to the wrong machine.
 func matchPeers(peers []discovery.PeerCandidate, target string) []discovery.PeerCandidate {
-	want := strings.ToLower(strings.ReplaceAll(target, "-", ""))
-
-	var out []discovery.PeerCandidate
-	for _, p := range peers {
-		id := strings.ToLower(string(p.DeviceID))
-		switch {
-		case id == want,
-			len(want) >= 4 && strings.HasPrefix(id, want),
-			p.DisplayName != "" && strings.EqualFold(p.DisplayName, target):
-			out = append(out, p)
-		}
-	}
-	return out
+	return discovery.Match(peers, target)
 }
 
-// isHostPort reports whether the user typed an address rather than a device.
-func isHostPort(s string) bool {
-	host, port, err := net.SplitHostPort(s)
-	if err != nil {
-		return false
-	}
-	if _, err := strconv.Atoi(port); err != nil {
-		return false
-	}
-	// "laptop:9000" is an address; a bare DeviceID never contains a colon.
-	return host != "" || strings.HasPrefix(s, ":")
-}
+func isHostPort(s string) bool { return discovery.IsAddr(s) }
 
 // fingerprint formats a DeviceID for a human to read aloud or compare on a
-// screen. The DeviceID is already the truncated hash of the identity key
-// (PROTOCOL.md §2); grouping only makes it checkable without losing your place.
-func fingerprint(id identity.DeviceID) string {
-	s := string(id)
-	var b strings.Builder
-	for i := 0; i < len(s); i += 4 {
-		if i > 0 {
-			b.WriteByte('-')
-		}
-		b.WriteString(s[i:min(i+4, len(s))])
-	}
-	return b.String()
-}
+// screen.
+func fingerprint(id identity.DeviceID) string { return id.Fingerprint() }
 
 // confirm prints a prompt and reads a yes/no answer. Anything other than an
 // explicit yes is no: at this milestone the fingerprint comparison is the only

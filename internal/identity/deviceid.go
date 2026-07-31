@@ -46,3 +46,21 @@ func (d DeviceID) Valid() bool {
 }
 
 func (d DeviceID) String() string { return string(d) }
+
+// Fingerprint formats a DeviceID for a human to read aloud or compare on a
+// screen: four groups of four, hyphenated.
+//
+// The DeviceID is already the truncated hash of the identity key (§2); grouping
+// only makes it checkable without losing your place. It is presentation, never
+// a wire value -- nothing parses this back.
+func (d DeviceID) Fingerprint() string {
+	s := string(d)
+	var b strings.Builder
+	for i := 0; i < len(s); i += 4 {
+		if i > 0 {
+			b.WriteByte('-')
+		}
+		b.WriteString(s[i:min(i+4, len(s))])
+	}
+	return b.String()
+}
