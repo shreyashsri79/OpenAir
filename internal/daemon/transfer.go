@@ -71,11 +71,24 @@ func (d *Daemon) sessionTo(ctx context.Context, target string) (session.Session,
 
 	addrs, err := d.targetAddrs(ctx, target)
 	if err != nil {
+		// No usable address. A relay is exactly the case where there is none:
+		// a device behind a NAT publishes no endpoint anyone can dial, and is
+		// reached through its forwarder instead (M8, §17).
+		if sess, relayErr := d.tryRelay(ctx, target); relayErr == nil {
+			return sess, nil
+		}
 		return nil, err
 	}
 
 	sess, err := d.dialFirst(ctx, addrs)
 	if err != nil {
+		// Every direct path failed. The relay is the fallback, not the first
+		// choice: it costs an extra hop and it tells its operator that these
+		// two devices are talking.
+		if relayed, relayErr := d.tryRelay(ctx, target); relayErr == nil {
+			d.cfg.Logf("no direct path to %s; using the relay", target)
+			return relayed, nil
+		}
 		// The far end refuses an unpaired peer during Hello (M2), so this dial
 		// fails before the local check below is ever reached. The advice is the
 		// same, and the caller needs it rather than a transport error.
@@ -132,10 +145,10 @@ func (d *Daemon) targetAddrs(ctx context.Context, target string) ([]string, erro
 
 	// The local network first: it is faster, it needs no third party, and it is
 	// the case that covers most transfers.
-	if d.disco != nil {
+	if disco := d.discovery(); disco != nil {
 		deadline := time.Now().Add(resolveWait)
 		for {
-			matches := discovery.Match(d.disco.Peers(), target)
+			matches := discovery.Match(disco.Peers(), target)
 			switch {
 			case len(matches) == 1:
 				return matches[0].Addrs, nil
@@ -171,7 +184,7 @@ func (d *Daemon) targetAddrs(ctx context.Context, target string) ([]string, erro
 		}
 	}
 
-	if d.disco == nil && d.rendezvousClient() == nil {
+	if d.discovery() == nil && d.rendezvousClient() == nil {
 		return nil, fmt.Errorf("%q is not a host:port, and neither discovery nor a rendezvous server is running", target)
 	}
 	return nil, fmt.Errorf("%w: no device matching %q is on the local network or published to the rendezvous server; "+
@@ -334,4 +347,29 @@ func (d *Daemon) awaitPairingSession(ctx context.Context) (session.Session, erro
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+// tryRelay opens a relayed session to a paired device, and registers it.
+//
+// It answers only for a target that resolves to a paired DeviceID: a relayed
+// path addresses a device rather than an address, and the pinned key is what
+// makes the far end verifiable once it answers.
+func (d *Daemon) tryRelay(ctx context.Context, target string) (session.Session, error) {
+	if d.relayPacketConn() == nil {
+		return nil, errors.New("no relay connection")
+	}
+	id, ok := d.resolvePaired(target)
+	if !ok {
+		return nil, fmt.Errorf("%q is not a paired device, so it cannot be reached through a relay", target)
+	}
+	sess, err := d.dialViaRelay(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.pairs.Authorize(sess.Peer()); err != nil {
+		sess.Close(uint16(session.CodeNotPaired), "not paired")
+		return nil, err
+	}
+	d.register(sess)
+	return sess, nil
 }

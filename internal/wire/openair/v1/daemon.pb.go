@@ -351,8 +351,12 @@ type DaemonStatusResponse struct {
 	// would be the least useful true statement available.
 	RendezvousExpiresUnixMs int64  `protobuf:"varint,17,opt,name=rendezvous_expires_unix_ms,json=rendezvousExpiresUnixMs,proto3" json:"rendezvous_expires_unix_ms,omitempty"`
 	RendezvousError         string `protobuf:"bytes,18,opt,name=rendezvous_error,json=rendezvousError,proto3" json:"rendezvous_error,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// Relay (M8, §17). Empty address means none is configured, which is a device
+	// reachable only where a direct path exists.
+	RelayAddr      string `protobuf:"bytes,19,opt,name=relay_addr,json=relayAddr,proto3" json:"relay_addr,omitempty"`
+	RelayConnected bool   `protobuf:"varint,20,opt,name=relay_connected,json=relayConnected,proto3" json:"relay_connected,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DaemonStatusResponse) Reset() {
@@ -509,6 +513,20 @@ func (x *DaemonStatusResponse) GetRendezvousError() string {
 		return x.RendezvousError
 	}
 	return ""
+}
+
+func (x *DaemonStatusResponse) GetRelayAddr() string {
+	if x != nil {
+		return x.RelayAddr
+	}
+	return ""
+}
+
+func (x *DaemonStatusResponse) GetRelayConnected() bool {
+	if x != nil {
+		return x.RelayConnected
+	}
+	return false
 }
 
 // DaemonDeviceListRequest lists what the daemon can see: paired devices from
@@ -1913,7 +1931,7 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"openair.v1\x1a\x1aopenair/v1/clipboard.proto\x1a\x17openair/v1/common.proto\"4\n" +
 	"\x13DaemonStatusRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\x04R\trequestId\"\xc9\x05\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\"\x91\x06\n" +
 	"\x14DaemonStatusResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
@@ -1938,7 +1956,10 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\rkey_swappable\x18\x0f \x01(\bR\fkeySwappable\x12'\n" +
 	"\x0frendezvous_addr\x18\x10 \x01(\tR\x0erendezvousAddr\x12;\n" +
 	"\x1arendezvous_expires_unix_ms\x18\x11 \x01(\x03R\x17rendezvousExpiresUnixMs\x12)\n" +
-	"\x10rendezvous_error\x18\x12 \x01(\tR\x0frendezvousError\"Y\n" +
+	"\x10rendezvous_error\x18\x12 \x01(\tR\x0frendezvousError\x12\x1d\n" +
+	"\n" +
+	"relay_addr\x18\x13 \x01(\tR\trelayAddr\x12'\n" +
+	"\x0frelay_connected\x18\x14 \x01(\bR\x0erelayConnected\"Y\n" +
 	"\x17DaemonDeviceListRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1f\n" +

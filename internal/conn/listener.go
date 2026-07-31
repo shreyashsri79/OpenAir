@@ -122,6 +122,13 @@ func Listen(addr string, local identity.Identity, displayName, platform string, 
 		return nil, err
 	}
 
+	return newListener(ln, local, displayName, platform, handlers, opts), nil
+}
+
+// newListener wraps an already-bound quic.Listener. It exists so that a
+// listener over a relay's packet conn (relayed.go) is the same listener as one
+// over UDP rather than a second implementation of the same accept loop.
+func newListener(ln *quic.Listener, local identity.Identity, displayName, platform string, handlers map[byte]session.Handler, opts ListenOptions) Listener {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &listener{
 		ln:          ln,
@@ -134,7 +141,7 @@ func Listen(addr string, local identity.Identity, displayName, platform string, 
 		ctx:         ctx,
 		cancel:      cancel,
 		slots:       make(chan struct{}, maxPendingHandshakes),
-	}, nil
+	}
 }
 
 // Accept waits for and returns the next inbound session.

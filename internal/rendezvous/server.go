@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/shreyashsri79/openair/internal/identity"
+	"github.com/shreyashsri79/openair/internal/infra"
 	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
 )
 
@@ -110,7 +111,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 func (s *Server) serveConn(ctx context.Context, nc net.Conn) {
 	defer nc.Close()
 
-	tlsConf, observed, err := identityPairingConfig(s.local)
+	tlsConf, observed, err := infra.PairingTLS(s.local)
 	if err != nil {
 		s.logf("tls config: %v", err)
 		return
@@ -136,7 +137,7 @@ func (s *Server) serveConn(ctx context.Context, nc net.Conn) {
 
 	for {
 		_ = conn.SetReadDeadline(s.now().Add(idleTimeout))
-		msgType, payload, err := readMessage(conn)
+		msgType, payload, err := infra.ReadMessage(conn)
 		if err != nil {
 			return
 		}
@@ -149,14 +150,14 @@ func (s *Server) serveConn(ctx context.Context, nc net.Conn) {
 
 func (s *Server) handle(conn *tls.Conn, caller identity.DeviceID, callerKey ed25519.PublicKey, msgType uint16, payload []byte) error {
 	switch msgType {
-	case MsgRegister:
+	case infra.MsgRegister:
 		var reg openairv1.Registration
 		if err := proto.Unmarshal(payload, &reg); err != nil {
 			return s.refuse(conn, "malformed registration")
 		}
 		return s.onRegister(conn, caller, callerKey, &reg)
 
-	case MsgLookupRequest:
+	case infra.MsgLookupRequest:
 		var req openairv1.LookupRequest
 		if err := proto.Unmarshal(payload, &req); err != nil {
 			return s.refuse(conn, "malformed lookup")
@@ -209,7 +210,7 @@ func (s *Server) onRegister(conn *tls.Conn, caller identity.DeviceID, callerKey 
 	s.entries[id] = entry{reg: proto.Clone(reg).(*openairv1.Registration), expires: expires}
 	s.mu.Unlock()
 
-	return writeMessage(conn, MsgRegisterAck, &openairv1.RegistrationAck{ExpiresAt: expires.UnixMilli()})
+	return infra.WriteMessage(conn, infra.MsgRegisterAck, &openairv1.RegistrationAck{ExpiresAt: expires.UnixMilli()})
 }
 
 // onLookup answers where a device is, if it has said so recently.
@@ -234,16 +235,16 @@ func (s *Server) onLookup(conn *tls.Conn, req *openairv1.LookupRequest) error {
 			}
 			s.mu.Unlock()
 		}
-		return writeMessage(conn, MsgLookupResponse, &openairv1.LookupResponse{Found: false})
+		return infra.WriteMessage(conn, infra.MsgLookupResponse, &openairv1.LookupResponse{Found: false})
 	}
-	return writeMessage(conn, MsgLookupResponse, &openairv1.LookupResponse{
+	return infra.WriteMessage(conn, infra.MsgLookupResponse, &openairv1.LookupResponse{
 		Registration: e.reg,
 		Found:        true,
 	})
 }
 
 func (s *Server) refuse(conn *tls.Conn, msg string) error {
-	if err := writeMessage(conn, MsgError, &openairv1.InfraError{Message: msg}); err != nil {
+	if err := infra.WriteMessage(conn, infra.MsgError, &openairv1.InfraError{Message: msg}); err != nil {
 		return err
 	}
 	return fmt.Errorf("refused: %s", msg)
@@ -262,22 +263,4 @@ func (s *Server) Entries() int {
 		}
 	}
 	return len(s.entries)
-}
-
-// identityPairingConfig builds a per-connection TLS config that presents this
-// identity and observes whatever key the other end presents.
-//
-// "Pairing mode" is the identity package's name for it, and the meaning is the
-// same here as there: nothing is pinned in advance, because a server does not
-// know which devices will connect and a client identifies its server by the
-// DeviceID that key derives.
-func identityPairingConfig(id identity.Identity) (*tls.Config, *identity.ObservedKey, error) {
-	type pairingConfigurer interface {
-		TLSConfigPairing() (*tls.Config, *identity.ObservedKey, error)
-	}
-	pc, ok := id.(pairingConfigurer)
-	if !ok {
-		return nil, nil, errors.New("rendezvous: identity cannot observe peer keys")
-	}
-	return pc.TLSConfigPairing()
 }

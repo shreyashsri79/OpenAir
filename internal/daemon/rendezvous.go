@@ -89,10 +89,10 @@ func (d *Daemon) startRendezvous(ctx context.Context) {
 			d.cfg.Logf("cannot work out what to register: %v", err)
 			return nil, ""
 		}
-		// relay_home is empty until M8: this device is reachable at these
-		// addresses or not at all, and claiming a relay it does not have would
-		// send peers somewhere that cannot forward to it.
-		return endpoints, ""
+		// The relay home is published only while a relay connection is actually
+		// live (M8). Claiming one this device is not connected to would send
+		// peers to a forwarder that has no mailbox for it.
+		return endpoints, d.relayHome()
 	})
 }
 

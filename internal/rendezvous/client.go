@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shreyashsri79/openair/internal/identity"
+	"github.com/shreyashsri79/openair/internal/infra"
 	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
 )
 
@@ -124,11 +125,11 @@ func (c *Client) Register(ctx context.Context, endpoints []string, relayHome str
 		ExpiresAt: expiresAt,
 		Signature: sig,
 	}
-	if err := writeMessage(conn, MsgRegister, reg); err != nil {
+	if err := infra.WriteMessage(conn, infra.MsgRegister, reg); err != nil {
 		return time.Time{}, err
 	}
 	var ack openairv1.RegistrationAck
-	if err := readInto(conn, MsgRegisterAck, &ack); err != nil {
+	if err := infra.ReadInto(conn, infra.MsgRegisterAck, &ack); err != nil {
 		c.note(time.Time{}, err)
 		return time.Time{}, err
 	}
@@ -154,11 +155,11 @@ func (c *Client) Lookup(ctx context.Context, target identity.DeviceID, peerKey e
 	}
 	defer conn.Close()
 
-	if err := writeMessage(conn, MsgLookupRequest, &openairv1.LookupRequest{DeviceId: string(target)}); err != nil {
+	if err := infra.WriteMessage(conn, infra.MsgLookupRequest, &openairv1.LookupRequest{DeviceId: string(target)}); err != nil {
 		return nil, "", err
 	}
 	var resp openairv1.LookupResponse
-	if err := readInto(conn, MsgLookupResponse, &resp); err != nil {
+	if err := infra.ReadInto(conn, infra.MsgLookupResponse, &resp); err != nil {
 		return nil, "", err
 	}
 	if !resp.GetFound() || resp.GetRegistration() == nil {
@@ -245,7 +246,7 @@ func (c *Client) dial(ctx context.Context) (*tls.Conn, error) {
 		return nil, fmt.Errorf("rendezvous: dial %s: %w", c.cfg.Addr, err)
 	}
 
-	tlsConf, observed, err := identityPairingConfig(c.cfg.Local)
+	tlsConf, observed, err := infra.PairingTLS(c.cfg.Local)
 	if err != nil {
 		nc.Close()
 		return nil, err

@@ -83,6 +83,11 @@ message DaemonStatusResponse {
   // would be the least useful true statement available.
   int64 rendezvous_expires_unix_ms = 17;
   string rendezvous_error = 18;
+
+  // Relay (M8, §17). Empty address means none is configured, which is a device
+  // reachable only where a direct path exists.
+  string relay_addr = 19;
+  bool relay_connected = 20;
 }
 
 // DaemonDeviceListRequest lists what the daemon can see: paired devices from

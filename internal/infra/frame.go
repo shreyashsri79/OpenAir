@@ -1,23 +1,23 @@
-// Package rendezvous is PROTOCOL.md §16: the server that maps a DeviceID to
-// where it can currently be reached, and the client that keeps that mapping
-// fresh.
+// Package infra holds what the rendezvous server (PROTOCOL.md §16) and the
+// relay (§17) have in common: the control-message framing D-62 defines, and the
+// TLS arrangement both use.
 //
-// It is deliberately small and deliberately unimportant. A rendezvous server
-// learns which DeviceIDs exist, their IP endpoints, when they are online and
-// who looks up whom — and nothing else, because it carries no session traffic
-// at all. Peers authenticate each other by pinned key (§2), so a server that
-// lies about an endpoint achieves a failed handshake and no more. That is what
-// makes self-hosting a reasonable answer rather than a slogan: the operator is
-// trusted with metadata and with nothing else.
-package rendezvous
+// It exists because the two services are spoken to the same way and are
+// otherwise unrelated. Without it the framing would be written twice and would
+// drift, which for a wire format means two implementations that stop
+// interoperating without either being wrong on its own terms.
+package infra
 
 import (
+	"crypto/tls"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/shreyashsri79/openair/internal/identity"
 	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
 )
 
@@ -32,7 +32,8 @@ import (
 // this connection is spoken to a server, not to a peer, and reusing the
 // envelope would mean inventing values for three fields that mean nothing.
 const (
-	headerSize = 6
+	// HeaderSize is msgType u16 + length u32.
+	HeaderSize = 6
 
 	// MaxMessageSize bounds one control message. Registrations are a few
 	// hundred bytes; the cap exists so a hostile client cannot make the server
@@ -47,19 +48,24 @@ const (
 	MsgLookupRequest  = uint16(openairv1.InfraMessageType_INFRA_MESSAGE_TYPE_LOOKUP_REQUEST)
 	MsgLookupResponse = uint16(openairv1.InfraMessageType_INFRA_MESSAGE_TYPE_LOOKUP_RESPONSE)
 	MsgError          = uint16(openairv1.InfraMessageType_INFRA_MESSAGE_TYPE_ERROR)
+
+	MsgRelayHello     = uint16(openairv1.InfraMessageType_INFRA_MESSAGE_TYPE_RELAY_HELLO)
+	MsgRelayChallenge = uint16(openairv1.InfraMessageType_INFRA_MESSAGE_TYPE_RELAY_CHALLENGE)
+	MsgRelayAuth      = uint16(openairv1.InfraMessageType_INFRA_MESSAGE_TYPE_RELAY_AUTH)
+	MsgRelayAuthOK    = uint16(openairv1.InfraMessageType_INFRA_MESSAGE_TYPE_RELAY_AUTH_OK)
 )
 
 // writeMessage frames and writes one message.
-func writeMessage(w io.Writer, msgType uint16, msg proto.Message) error {
+func WriteMessage(w io.Writer, msgType uint16, msg proto.Message) error {
 	payload, err := proto.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("rendezvous: marshal type %d: %w", msgType, err)
+		return fmt.Errorf("infra: marshal type %d: %w", msgType, err)
 	}
 	if len(payload) > MaxMessageSize {
-		return fmt.Errorf("rendezvous: message type %d is %d bytes, over the %d cap",
+		return fmt.Errorf("infra: message type %d is %d bytes, over the %d cap",
 			msgType, len(payload), MaxMessageSize)
 	}
-	buf := make([]byte, 0, headerSize+len(payload))
+	buf := make([]byte, 0, HeaderSize+len(payload))
 	buf = binary.LittleEndian.AppendUint16(buf, msgType)
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(payload)))
 	buf = append(buf, payload...)
@@ -69,15 +75,15 @@ func writeMessage(w io.Writer, msgType uint16, msg proto.Message) error {
 
 // readMessage reads one frame. The length is validated before anything is
 // allocated, so a six-byte header claiming 4 GiB costs the reader nothing.
-func readMessage(r io.Reader) (uint16, []byte, error) {
-	var hdr [headerSize]byte
+func ReadMessage(r io.Reader) (uint16, []byte, error) {
+	var hdr [HeaderSize]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return 0, nil, err
 	}
 	msgType := binary.LittleEndian.Uint16(hdr[0:2])
 	length := binary.LittleEndian.Uint32(hdr[2:6])
 	if length > MaxMessageSize {
-		return 0, nil, fmt.Errorf("rendezvous: frame claims %d bytes, over the %d cap", length, MaxMessageSize)
+		return 0, nil, fmt.Errorf("infra: frame claims %d bytes, over the %d cap", length, MaxMessageSize)
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
@@ -89,20 +95,20 @@ func readMessage(r io.Reader) (uint16, []byte, error) {
 // readInto reads one frame and unmarshals it, checking the type is the one
 // expected. An InfraError arriving in place of the expected reply is returned
 // as a Go error, so a caller never has to check for it separately.
-func readInto(r io.Reader, want uint16, out proto.Message) error {
-	msgType, payload, err := readMessage(r)
+func ReadInto(r io.Reader, want uint16, out proto.Message) error {
+	msgType, payload, err := ReadMessage(r)
 	if err != nil {
 		return err
 	}
 	if msgType == MsgError && want != MsgError {
 		var e openairv1.InfraError
 		if err := proto.Unmarshal(payload, &e); err != nil {
-			return fmt.Errorf("rendezvous: malformed error reply: %w", err)
+			return fmt.Errorf("infra: malformed error reply: %w", err)
 		}
 		return &ServerError{Message: e.GetMessage()}
 	}
 	if msgType != want {
-		return fmt.Errorf("rendezvous: expected message type %d, got %d", want, msgType)
+		return fmt.Errorf("infra: expected message type %d, got %d", want, msgType)
 	}
 	return proto.Unmarshal(payload, out)
 }
@@ -112,4 +118,22 @@ func readInto(r io.Reader, want uint16, out proto.Message) error {
 // will repeat until something changes, and a dropped connection will not.
 type ServerError struct{ Message string }
 
-func (e *ServerError) Error() string { return "rendezvous: " + e.Message }
+func (e *ServerError) Error() string { return "infra: " + e.Message }
+
+// PairingTLS builds a per-connection TLS config that presents this identity and
+// observes whatever key the other end presents.
+//
+// "Pairing mode" is the identity package's name for it and the meaning carries
+// over: nothing is pinned in advance. A server does not know which devices will
+// connect, and a client identifies its server by the DeviceID that key derives
+// (D-62) rather than by a certificate authority, of which this design has none.
+func PairingTLS(id identity.Identity) (*tls.Config, *identity.ObservedKey, error) {
+	type pairingConfigurer interface {
+		TLSConfigPairing() (*tls.Config, *identity.ObservedKey, error)
+	}
+	pc, ok := id.(pairingConfigurer)
+	if !ok {
+		return nil, nil, errors.New("infra: identity cannot observe peer keys")
+	}
+	return pc.TLSConfigPairing()
+}

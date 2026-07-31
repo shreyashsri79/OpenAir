@@ -137,7 +137,7 @@ func (d *Daemon) onStatus(c *client, payload []byte) {
 		StartedUnix:    d.started.Unix(),
 		PairedDevices:  uint32(len(peers)),
 		ActiveSessions: uint32(sessions),
-		Announcing:     d.disco != nil && !d.cfg.NoAnnounce,
+		Announcing:     d.discovery() != nil && !d.cfg.NoAnnounce,
 		AutoAccept:     d.cfg.AutoAccept,
 		Subscribers:    uint32(subs),
 		ProtectionTier: session.ProtectionTierToWire(d.id.ProtectionTier()),
@@ -159,6 +159,8 @@ func (d *Daemon) onStatus(c *client, payload []byte) {
 			}
 			return 0
 		}(),
+		RelayAddr:      d.cfg.Relay.Addr,
+		RelayConnected: d.relayPacketConn() != nil,
 		RendezvousError: func() string {
 			if c := d.rendezvousClient(); c != nil {
 				if _, err := c.LastRegistration(); err != nil {
@@ -200,8 +202,8 @@ func (d *Daemon) onDeviceList(c *client, payload []byte) {
 		out = append(out, dev)
 	}
 
-	if d.disco != nil {
-		for _, cand := range d.disco.Peers() {
+	if disco := d.discovery(); disco != nil {
+		for _, cand := range disco.Peers() {
 			if dev, ok := byID[cand.DeviceID]; ok {
 				dev.Addrs = cand.Addrs
 				if dev.DisplayName == "" {

@@ -968,6 +968,28 @@ After authentication a client has a mailbox keyed by DeviceID. Frames are:
  +-----------------------------------------------+
 ```
 
+The 16-byte field is the **destination** on a client-to-relay frame and the
+**source** on a relay-to-client frame. A client only receives frames addressed
+to itself, so a destination there would carry nothing, and the receiver could
+not tell which peer a packet came from — which one QUIC connection per peer
+requires it to know (D-64).
+
+`RelayAuth` signs:
+
+```
+signed = "openair-relay-v1" || device_id
+      || len(client_nonce) || client_nonce
+      || len(server_nonce) || server_nonce
+```
+
+Nonces are 32 bytes and lengths are u32. The context string is what stops a
+relay signature being presented as an Owned `AuthProof` (§6) or a rendezvous
+`Registration` (§16), all three being made by the same identity key; the length
+prefixes stop the two nonces being re-split under one signature (D-65).
+
+Control messages before authentication completes use §16's framing. After it,
+the connection carries data frames only.
+
 The relay MUST NOT inspect or modify the payload, MUST NOT deliver to a DeviceID
 that has not authenticated, and SHOULD rate-limit per source. Because the
 payload is a complete QUIC packet, end-to-end encryption is unchanged when a

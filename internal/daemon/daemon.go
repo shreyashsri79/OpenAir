@@ -87,6 +87,10 @@ type Config struct {
 	// peers up when they are not on this network (M7, §16). Empty disables it.
 	Rendezvous RendezvousConfig
 
+	// Relay is the forwarder to be reachable through when no direct path works
+	// (M8, §17). Empty disables it.
+	Relay RelayConfig
+
 	Logf func(format string, args ...any)
 
 	// Discovery carries the test-only knobs that keep two daemons inside one
@@ -120,6 +124,9 @@ type Daemon struct {
 	// rendezvous is nil unless one is configured. Held under mu because Run
 	// installs it after New has returned.
 	rendezvous *rendezvous.Client
+
+	// relay is the live relay connection and the listener riding it (M8).
+	relay relayState
 
 	mu       sync.Mutex
 	sessions map[identity.DeviceID]session.Session
@@ -222,12 +229,7 @@ func New(cfg Config) (*Daemon, error) {
 
 	// capID 0 is registered so a peer that revokes this device mid-session is
 	// honoured while a transfer is still running (§6.1).
-	handlers := map[byte]session.Handler{
-		0:               d.pairs,
-		files.CapID:     d.files,
-		clipboard.CapID: d.clip,
-	}
-	d.ln, err = conn.Listen(cfg.Listen, id, cfg.DisplayName, platform(), handlers, conn.ListenOptions{
+	d.ln, err = conn.Listen(cfg.Listen, id, cfg.DisplayName, platform(), d.handlers(), conn.ListenOptions{
 		Authorize:   d.authorize,
 		PeerLookup:  d.store.Get,
 		OnAuthEvent: d.onAuthEvent,
@@ -283,7 +285,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		// device already paired and dialling in.
 		d.cfg.Logf("not advertising on the local network: %v", err)
 	} else {
-		d.disco = disco
+		d.setDiscovery(disco)
 		defer disco.Close()
 	}
 
@@ -304,6 +306,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.cfg.Logf("no system clipboard here; inbound pushes will be reported, not pasted")
 	}
 
+	d.startRelay(ctx)
 	d.startRendezvous(ctx)
 
 	var wg sync.WaitGroup
@@ -350,9 +353,26 @@ func (d *Daemon) Close() error {
 // acceptSessions is the inbound half. A refused peer is one event, not the end
 // of the loop: a daemon that stops listening because a stranger knocked has
 // been denied service by anyone who can reach its port.
-func (d *Daemon) acceptSessions(ctx context.Context) {
+// handlers is the capability set this device serves. One place, because a
+// relayed listener must serve exactly what the direct one does -- a peer
+// arriving over the relay is the same peer (M8).
+//
+// capID 0 is registered so a peer that revokes this device mid-session is
+// honoured while a transfer is still running (§6.1).
+func (d *Daemon) handlers() map[byte]session.Handler {
+	return map[byte]session.Handler{
+		0:               d.pairs,
+		files.CapID:     d.files,
+		clipboard.CapID: d.clip,
+	}
+}
+
+func (d *Daemon) acceptSessions(ctx context.Context) { d.acceptFrom(ctx, d.ln) }
+
+// acceptFrom serves one listener: the UDP one, or the one riding a relay.
+func (d *Daemon) acceptFrom(ctx context.Context, ln conn.Listener) {
 	for {
-		sess, err := d.ln.Accept(ctx)
+		sess, err := ln.Accept(ctx)
 		if err != nil {
 			var he *conn.HandshakeError
 			if errors.As(err, &he) {
@@ -410,6 +430,24 @@ func (d *Daemon) register(sess session.Session) {
 }
 
 // sessionFor returns a live session with a peer, if one is already up.
+// setDiscovery and discovery guard d.disco, which Run installs after New has
+// returned and every request handler reads.
+//
+// Unguarded, that is a real race and not only a test artefact: an IPC client
+// can ask for a device list in the same millisecond Run is starting discovery
+// up, and the two goroutines are unsynchronised.
+func (d *Daemon) setDiscovery(disco *discovery.Discovery) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.disco = disco
+}
+
+func (d *Daemon) discovery() *discovery.Discovery {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.disco
+}
+
 func (d *Daemon) sessionFor(id identity.DeviceID) (session.Session, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -436,14 +474,15 @@ func (d *Daemon) authorize(peer identity.Peer) error {
 // watchDiscovery turns discovery events into daemon events, so a subscribed UI
 // sees devices appear without polling.
 func (d *Daemon) watchDiscovery(ctx context.Context) {
-	if d.disco == nil {
+	disco := d.discovery()
+	if disco == nil {
 		return
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case ev, ok := <-d.disco.Events():
+		case ev, ok := <-disco.Events():
 			if !ok {
 				return
 			}

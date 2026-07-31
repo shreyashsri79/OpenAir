@@ -44,6 +44,8 @@ func main() {
 	flag.BoolVar(&quiet, "quiet", false, "log nothing but errors")
 	rendezvousAddr := flag.String("rendezvous", "",
 		"rendezvous server as host:port@deviceid, so paired devices can find this one across networks")
+	relayAddr := flag.String("relay", "",
+		"relay server as host:port@deviceid, to stay reachable where no direct path works")
 	flag.Parse()
 
 	rv, err := daemon.ParseRendezvous(*rendezvousAddr)
@@ -51,6 +53,12 @@ func main() {
 		log.Fatal(err)
 	}
 	cfg.Rendezvous = rv
+
+	relayCfg, err := daemon.ParseRelay(*relayAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg.Relay = relayCfg
 
 	if !quiet {
 		cfg.Logf = func(format string, args ...any) { log.Printf(format, args...) }

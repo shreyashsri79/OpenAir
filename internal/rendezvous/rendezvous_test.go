@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shreyashsri79/openair/internal/identity"
+	"github.com/shreyashsri79/openair/internal/infra"
 	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
 )
 
@@ -158,7 +159,7 @@ func TestForgedRegistrationRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = writeMessage(conn, MsgRegister, &openairv1.Registration{
+	err = infra.WriteMessage(conn, infra.MsgRegister, &openairv1.Registration{
 		DeviceId:  string(victim.DeviceID()),
 		Endpoints: []string{"203.0.113.9:9000"},
 		IssuedAt:  now.UnixMilli(),
@@ -170,7 +171,7 @@ func TestForgedRegistrationRejected(t *testing.T) {
 	}
 
 	var ack openairv1.RegistrationAck
-	if err := readInto(conn, MsgRegisterAck, &ack); err == nil {
+	if err := infra.ReadInto(conn, infra.MsgRegisterAck, &ack); err == nil {
 		t.Fatal("the server accepted a registration for a device the caller does not hold the key for")
 	}
 	if h.server.Entries() != 0 {
@@ -196,7 +197,7 @@ func TestRegistrationSignatureIsCheckedAgainstItsContents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = writeMessage(conn, MsgRegister, &openairv1.Registration{
+	err = infra.WriteMessage(conn, infra.MsgRegister, &openairv1.Registration{
 		DeviceId:  string(device.DeviceID()),
 		Endpoints: []string{"203.0.113.9:9000"}, // not what was signed
 		IssuedAt:  now.UnixMilli(),
@@ -208,7 +209,7 @@ func TestRegistrationSignatureIsCheckedAgainstItsContents(t *testing.T) {
 	}
 
 	var ack openairv1.RegistrationAck
-	if err := readInto(conn, MsgRegisterAck, &ack); err == nil {
+	if err := infra.ReadInto(conn, infra.MsgRegisterAck, &ack); err == nil {
 		t.Fatal("the server accepted endpoints that were not the ones signed")
 	}
 	if h.server.Entries() != 0 {
@@ -365,7 +366,7 @@ func TestOversizedFrameRefused(t *testing.T) {
 	// msgType 1, length 0xFFFFFFFF.
 	buf.Write([]byte{1, 0, 0xff, 0xff, 0xff, 0xff})
 
-	_, _, err := readMessage(strings.NewReader(buf.String()))
+	_, _, err := infra.ReadMessage(strings.NewReader(buf.String()))
 	if err == nil {
 		t.Fatal("a frame claiming 4 GiB was accepted")
 	}
@@ -387,12 +388,12 @@ func TestUnknownMessageTypeIsRefused(t *testing.T) {
 	}
 	defer conn.Close()
 
-	if err := writeMessage(conn, 999, &openairv1.LookupRequest{DeviceId: string(device.DeviceID())}); err != nil {
+	if err := infra.WriteMessage(conn, 999, &openairv1.LookupRequest{DeviceId: string(device.DeviceID())}); err != nil {
 		t.Fatal(err)
 	}
 	var resp openairv1.LookupResponse
-	err = readInto(conn, MsgLookupResponse, &resp)
-	var serverErr *ServerError
+	err = infra.ReadInto(conn, infra.MsgLookupResponse, &resp)
+	var serverErr *infra.ServerError
 	if !errors.As(err, &serverErr) {
 		t.Fatalf("reply to an unknown message type: %v, want a ServerError", err)
 	}
@@ -477,15 +478,22 @@ func TestKeepRegisteredHeartbeats(t *testing.T) {
 		return []string{"192.0.2.1:9000"}, ""
 	})
 
-	deadline := time.Now().Add(5 * time.Second)
-	for calls.get() < 1 {
+	// Wait on the *result*, not on the callback: the endpoint function runs
+	// before Register does, so a test that waited for it would be checking
+	// LastRegistration while the registration was still in flight.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		at, err := c.LastRegistration()
+		if err == nil && !at.IsZero() {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("KeepRegistered never registered")
+			t.Fatalf("KeepRegistered never registered (%d attempts, last error %v)", calls.get(), err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if at, err := c.LastRegistration(); err != nil || at.IsZero() {
-		t.Fatalf("LastRegistration reports %s / %v after a successful heartbeat", at, err)
+	if calls.get() < 1 {
+		t.Fatal("the endpoint function was never consulted")
 	}
 }
 

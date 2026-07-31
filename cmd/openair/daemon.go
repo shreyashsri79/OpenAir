@@ -194,6 +194,13 @@ func runStatus(args []string, stdout io.Writer) error {
 			fmt.Fprintf(stdout, "rendezvous  %s -- registering\n", addr)
 		}
 	}
+	if addr := st.GetRelayAddr(); addr != "" {
+		state := "connecting"
+		if st.GetRelayConnected() {
+			state = "connected"
+		}
+		fmt.Fprintf(stdout, "relay       %s -- %s\n", addr, state)
+	}
 	if st.GetKeySwappable() {
 		fmt.Fprintf(stdout, "warning     the privilege key could not be locked into RAM; it may reach swap\n")
 	}
