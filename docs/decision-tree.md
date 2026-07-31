@@ -75,6 +75,11 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-63 | — | Is §16's signing input unambiguous? | **accepted** — no; variable-length fields are length-prefixed |
 | D-64 | — | What does the 16-byte field in a relay frame mean? | **accepted** — destination inbound, source outbound |
 | D-65 | — | Is §17's relay signature domain-separated? | **accepted** — it is now; closes one of D-43's four |
+| D-66 | — | What carries §18's punch signalling? | **accepted** — the existing session, capID 0, two new control msgTypes |
+| D-67 | — | Can `start_at` be read as an absolute instant? | **accepted** — no; the PunchReady edge synchronises, start_at is a bounded hint |
+| D-68 | — | Where does a reflexive address come from? | **accepted** — STUN, answered by the rendezvous server's own port |
+| D-69 | — | What performs the relay-to-direct migration? | **accepted** — a packet conn below QUIC, not quic-go's `AddPath` |
+| D-70 | — | How many QUIC transports may share one socket? | **accepted** — exactly one; two race for every packet |
 
 **Open right now:** D-9 (media plane, Phase 4). Linux tier 1 — TPM-sealed privilege keys — is deferred by D-61, which leaves the maintainer's own machine on tier 2 despite having a TPM. D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; the port has now landed (D-35, D-36), so what remains is comparing BBRv1 against D-17's Cubic baseline.
 
@@ -193,6 +198,34 @@ flowchart TD
     classDef accepted fill:#2e7d32,color:#fff,stroke:#1b5e20
     classDef rejected fill:#b71c1c,color:#fff,stroke:#7f0000
     classDef open fill:#ef6c00,color:#fff,stroke:#e65100
+```
+
+## Connectivity — reaching a peer anywhere
+
+```mermaid
+flowchart TD
+    QC{"§16-§18<br/>How does a device reach a peer<br/>that is not on this network?"}:::question
+
+    QC ==step 1==> D62["D-62 · rendezvous and relay control frames:<br/>length-prefixed protobuf over mutual TLS,<br/>the server pinned by DeviceID like any peer.<br/>The registering key is the client certificate's,<br/>because a DeviceID is a hash"]:::accepted
+    D62 --> D63["D-63 · §16's signing input length-prefixes<br/>its variable fields; without that<br/>[a,bc] and [ab,c] sign identically"]:::accepted
+
+    QC ==step 2==> D64["D-64 · a relay frame names the destination<br/>inbound and the source outbound.<br/>§17 says destination both ways, which leaves<br/>every received packet unattributable"]:::accepted
+    D64 --> D65C["D-65 · relay auth is domain-separated<br/>and length-framed — closes one of<br/>D-43's four open security questions"]:::accepted
+
+    QC ==step 3==> D66["D-66 · punch signalling rides the session<br/>that already exists, as capID 0 control<br/>messages. §18 allows the rendezvous server<br/>instead; ours holds no standing connection"]:::accepted
+    D66 --> D67["D-67 · start_at cannot be an absolute instant:<br/>§18 forbids trusting clocks in the same<br/>paragraph that names one. The PunchReady edge<br/>synchronises; start_at survives as a hint"]:::accepted
+    D66 --> D68["D-68 · the reflexive address comes from STUN,<br/>answered by openair-rendezvous on its own port,<br/>so self-hosting stays one server"]:::accepted
+
+    QC ==step 4==> D69["D-69 · migration happens in a packet conn<br/>below QUIC. quic-go's AddPath is client-only<br/>and keeps the remote address, so it cannot<br/>express relay-to-direct at all"]:::accepted
+    D69 -.rejected.-> R69["reconnect on the direct path<br/>a new connection means new streams:<br/>the transfer in flight restarts,<br/>which is the thing PRD R9 forbids"]:::rejected
+    D69 --> D70["D-70 · one QUIC transport per socket.<br/>Two race for every packet and each drops<br/>what the other needed — visible only as<br/>an intermittently slow network"]:::accepted
+    D69 -.constrained by.-> D69N["QUIC is not told the path changed:<br/>its RTT estimate and MTU belong to the<br/>old path and re-converge. A restarted<br/>transfer would be the worse trade"]:::evidence
+
+    classDef question fill:#1565c0,color:#fff,stroke:#0d47a1
+    classDef accepted fill:#2e7d32,color:#fff,stroke:#1b5e20
+    classDef rejected fill:#b71c1c,color:#fff,stroke:#7f0000
+    classDef open fill:#ef6c00,color:#fff,stroke:#e65100
+    classDef evidence fill:#455a64,color:#fff,stroke:#263238
 ```
 
 ## What is still open
@@ -1164,3 +1197,48 @@ Decision: the signed input is `"openair-relay-v1" || device_id || len(client_non
 Rationale: domain separation is what stops a signature made in one protocol being presented in another. Without it, the only thing keeping the three apart is an accident of their lengths and contents — which is not a security argument, and is exactly the kind of thing that stops being true when a message gains a field. The device_id in the input additionally binds the signature to the identity claiming it, so a captured signature cannot be presented by a different device even if it somehow matched.
 Alternatives considered: signing the two nonces raw as §17 literally says (rejected — no separation and re-splittable). A separate signing key per protocol (rejected — more keys to pin, revoke and lose, to solve what a 16-byte prefix solves).
 Consequences: §17 gains the signed-input definition it did not have, and this implementation will not interoperate with one written from the document as it stands — which is the correct outcome, since that one would be signing something weaker. D-43's list drops from four open security questions to three: the trust store's at-rest integrity, DeviceID as a permanent tracking identifier, and the D-20/D-21 disagreement about cold theft remain.
+
+## D-66: Punch signalling travels over the session that already exists
+Date: 2026-08-01
+Status: accepted (chooses between two options §18 offers)
+Context: §18 says "signalling travels over the rendezvous server or an existing relay session" and does not choose. The two are not equivalent here. This implementation's rendezvous client holds no connection between calls (one exchange every few minutes, and a pooled socket would be one more thing to keep alive across sleep and network changes), so a server-forwarded `PunchRequest` would need a new standing connection, a forwarding path through the server, and a rule for what the server does with a message for a device that is not connected. Meanwhile M8 guarantees a session already exists before any punch is worth attempting: §18 step 2 starts on the relay precisely so that one does.
+Decision: `PunchRequest` and `PunchReady` travel over the established session as capID 0 control messages, with two new `ControlMessageType` values (17 and 18). The messages themselves stay in `infra.proto` where §18 put them. The probe packets that follow are not specified by PROTOCOL.md at all and are defined in `internal/path/probe.go`: a four-byte magic beginning `0x00` — which clears QUIC's fixed bit, so a probe can never be confused with a QUIC packet — then a kind byte, the 16-byte token and the sender's DeviceID.
+Rationale: the signalling is already encrypted, already authenticated by the pinned key, and already addressed to exactly one peer. Sending it through a third party would give the rendezvous operator the candidate lists as well as the endpoints, for no gain. The punch token is what makes a probe unforgeable, and it only ever exists inside that encrypted session.
+Alternatives considered: forwarding through the rendezvous server (rejected — needs a standing connection this design deliberately does not keep, and widens what the operator learns). A new capability ID for punching (rejected — capID 0 is where session-level messages live, and two messages are not a capability).
+Consequences: a device can only punch towards a peer it already has a session with, which is exactly the case that matters. Two implementations that chose differently would not interoperate on the upgrade, and would both still work: the relayed session is unaffected.
+
+## D-67: `start_at` cannot be read as an absolute instant, so the exchange synchronises the spray
+Date: 2026-08-01
+Status: accepted (corrects PROTOCOL.md §18)
+Context: §18 gives `PunchRequest` a `start_at` field in unix milliseconds and says both sides "MUST begin within about 50 ms of it and MUST NOT rely on their clocks being better than that". Those two sentences cannot both be obeyed. If `start_at` is an absolute instant, then obeying it to 50 ms *is* relying on the clocks: two devices whose clocks differ by a minute — ordinary, and the reason NTP exists — would spray a minute apart and never overlap, making the field worse than useless.
+Decision: the spray is triggered by the exchange itself. The responder begins spraying when it sends `PunchReady`; the initiator begins when it receives one. That places the two within one one-way delay of each other with no clock involved. `start_at` is still sent and still honoured, but only as a short "not before" hint, and only when the local clock agrees it lies in the near future — `path.SprayDelay` ignores anything more than two seconds out, because past that it is measuring skew rather than intent.
+Rationale: the messages are already round-tripping between exactly the two parties that need to agree, which makes them a better clock than either device's. The 50 ms requirement is then met by construction on any path whose RTT is under 100 ms, and degrades gracefully rather than catastrophically on a slow one.
+Alternatives considered: requiring NTP-synchronised clocks (rejected — not something a protocol can require of a phone). Carrying `issued_at` as well and computing skew from it (rejected — the exchange already gives a better answer, and it would add a field to fix a field). Ignoring `start_at` entirely (rejected — it is on the wire, and a peer that does read it absolutely should still find our spray waiting).
+Consequences: §18 needs the paragraph the code now carries. An implementation written from the document as it stands will still interoperate, because both sides spray for several seconds and a hint that is honoured only when it is nearly zero cannot push them apart.
+
+## D-68: The rendezvous server answers STUN on its own port
+Date: 2026-08-01
+Status: accepted
+Context: §18 step 1 gathers "reflexive addresses from STUN" and names no server. A device behind NAT that offers only its private addresses gives the peer nothing to punch towards, so without a reflexive candidate the whole mechanism reduces to LAN-only. Pointing users at a public STUN server would add a third party to a design whose two servers are both self-hostable on purpose.
+Decision: `openair-rendezvous` binds UDP on the same address it already serves TCP on and answers RFC 8489 Binding requests there (`path.ServeSTUN`). A daemon with no `--stun` flag asks its rendezvous server. It is a plain STUN responder, so pointing `--stun` at anybody else's works exactly as well; and failing to bind the UDP port is a warning, not a fatal error, because it costs punching behind NAT and nothing else.
+Rationale: self-hosting should stay one process to run. The reflexive address is also the one thing the rendezvous operator already knows — it is the endpoint being registered — so answering STUN tells that operator nothing it did not have.
+Alternatives considered: a default list of public STUN servers (rejected — a third party in the connection path of a design that avoids them, and a privacy leak to whoever runs them). A separate `openair-stun` binary (rejected — one more thing to deploy for eight lines of protocol). Reporting the observed address from the relay's TCP connection instead (rejected — that is the TCP source port, and the mapping being punched belongs to the UDP one).
+Consequences: the STUN request must leave the same socket QUIC uses, which is part of why M9 makes the daemon bind its own UDP socket rather than letting quic-go do it.
+
+## D-69: The relay-to-direct migration happens below QUIC, not through quic-go's connection migration
+Date: 2026-08-01
+Status: accepted
+Context: §18 step 4 says to migrate to a better path once one succeeds and leans on QUIC connection IDs making that native: "streams do not break and transfers do not restart" (PRD R9). The fork does expose migration — `Conn.AddPath`, `Path.Probe`, `Path.Switch` — but it is client-only (`server cannot initiate connection migration`) and it carries the remote address over unchanged (`switchToNewPath` keeps `c.conn.RemoteAddr()`). Neither fits. The upgrade needed here is relay-to-direct, where the remote address is the entire difference, and it has to work on the accepting side too, because the device behind the NAT is as often the one accepting.
+Decision: a peer reached by DeviceID is addressed as `path.Addr{DeviceID}` — a stable `net.Addr` that does not change when the path does. `internal/path.Conn` is a `net.PacketConn` that owns the UDP socket and, optionally, a relay connection, and routes each peer's packets over whichever is currently valid. Promoting a punched address is a map write: the QUIC connection ID, the streams and any transfer in flight are untouched. It is the arrangement Tailscale's magicsock uses, for the same reason.
+Rationale: it is symmetric, which quic-go's migration is not, and it makes the claim in PROTOCOL.md §17 — that the relay is a network element rather than a participant — structurally true rather than nearly true: the layer above cannot tell which path it is on, so no capability can grow a dependency on one.
+Alternatives considered: `AddPath` on the dialling side only (rejected — half the sessions cannot use it, and it cannot change the remote address anyway). Opening a second QUIC connection on the direct path and moving new work to it (rejected — a transfer in flight either restarts or straddles two connections; R9 exists to forbid exactly that). Waiting for multipath QUIC (rejected — not in the fork, and this is not multipath: only one path carries traffic at a time).
+Consequences: QUIC is not told the path changed, so its RTT estimate and MTU belong to the old path and re-converge afterwards — BBR does that within a few round trips (D-14), and a restarted transfer would be the worse trade. Path *validation* is ours to do rather than QUIC's: an address is accepted only when a probe we sent to it is answered with the token that travelled inside the encrypted session, so a peer cannot name a third party's address and have our packets sent there. A device now binds its own UDP socket rather than letting quic-go bind one, which is also what STUN and the probes need (D-68).
+
+## D-70: One QUIC transport per socket
+Date: 2026-08-01
+Status: accepted
+Context: M9 makes a device dial and listen on one UDP socket, because a NAT mapping belongs to a port and the port that gets punched has to be the port the sessions use. The first version did that with the API already in the tree: `quic.Listen(pc, ...)` for inbound and `quic.Dial(ctx, pc, ...)` per outbound session. That compiles and works, and it is wrong. Each call builds a `quic.Transport` of its own, and each Transport runs its own read loop on the conn it was given, so two of them on one socket race for every packet and each swallows what the other needed.
+Decision: `conn.Endpoint` owns a single `quic.Transport` over the packet conn and provides both the listener and the dialler from it. The daemon holds one.
+Rationale: a Transport demultiplexes by connection ID and hands each packet to the right connection. That is the thing being bypassed by having two.
+Alternatives considered: separate sockets for dialling and accepting, as before M9 (rejected — then the punched mapping is for a port that carries nothing). Sniffing packets in the path conn and routing them to the right transport by hand (rejected — reimplementing connection-ID demultiplexing outside the library that already does it).
+Consequences: found as a 30% failure rate in an M6 test with a 400 ms budget, not as a lost packet or a stack trace — QUIC retransmits what goes missing, so the only symptom is an intermittently slow network, and the same mistake would be invisible on anything with a looser deadline. `DialPacketConn` and `ListenPacketConn` remain for callers that use a conn for one role only, which is what the relay tests do.

@@ -87,8 +87,10 @@ func (t quicTransport) PathInfo() PathInfo {
 	if rtt == 0 {
 		rtt = st.LatestRTT
 	}
-	// Bandwidth and path class need §7.2's PathInfo control message, which is
-	// M1's declared gap. LAN is the only path Phase 1 establishes.
+	// Bandwidth still needs §7.2's PathInfo control message, which remains a
+	// declared gap. The class here is the transport's own guess -- a direct
+	// dial to an address -- and Config.PathClass overrides it for a caller that
+	// knows better, which since M9 is the path layer underneath.
 	return PathInfo{
 		RTTMillis: uint32(rtt / time.Millisecond),
 		Class:     "lan",
@@ -654,7 +656,18 @@ func (s *sess) SendDatagram(b []byte) error {
 	return s.tr.SendDatagram(b)
 }
 
-func (s *sess) PathInfo() PathInfo { return s.tr.PathInfo() }
+// PathInfo is §7.2's advisory hint: the transport's measured RTT, plus the
+// path class from whoever knows it. The session does not know its own class --
+// the layer that switched the path is the layer that can say.
+func (s *sess) PathInfo() PathInfo {
+	info := s.tr.PathInfo()
+	if s.cfg.PathClass != nil {
+		if class := s.cfg.PathClass(s.Peer().DeviceID); class != "" {
+			info.Class = class
+		}
+	}
+	return info
+}
 
 func (s *sess) Send(ctx context.Context, capID byte, msgType uint16, msg proto.Message) error {
 	if err := ctx.Err(); err != nil {

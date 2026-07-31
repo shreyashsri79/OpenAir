@@ -27,6 +27,12 @@ enum ControlMessageType {
   CONTROL_MESSAGE_TYPE_QUIESCE_REQUEST = 14;
   CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE = 15;
   CONTROL_MESSAGE_TYPE_PATH_INFO = 16;
+  // Punch signalling (§18). The messages themselves are in infra.proto,
+  // because they are also the ones a rendezvous server would forward; these
+  // two values are how they travel over an existing session instead, which is
+  // the path §18 offers and the one that exists here (D-66).
+  CONTROL_MESSAGE_TYPE_PUNCH_REQUEST = 17;
+  CONTROL_MESSAGE_TYPE_PUNCH_READY = 18;
 }
 
 // Hello is exchanged by both peers immediately after the QUIC handshake.

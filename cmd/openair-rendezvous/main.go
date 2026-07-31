@@ -30,6 +30,7 @@ import (
 	"syscall"
 
 	"github.com/shreyashsri79/openair/internal/identity"
+	"github.com/shreyashsri79/openair/internal/path"
 	"github.com/shreyashsri79/openair/internal/rendezvous"
 )
 
@@ -73,6 +74,13 @@ func main() {
 		log.Fatalf("listen on %s: %v", *listen, err)
 	}
 
+	// The same port, over UDP, answers STUN Binding requests, so a device that
+	// has a rendezvous server has a reflexive address without having to trust
+	// anybody else's STUN server (M9, D-68). It is a plain RFC 8489 responder;
+	// failing to bind it costs punching behind NAT and nothing else, so it is
+	// a warning rather than a fatal error.
+	stunConn, stunErr := net.ListenPacket("udp", *listen)
+
 	fmt.Printf("rendezvous server on %s\n", ln.Addr())
 	fmt.Printf("device id  %s\n", id.DeviceID())
 	fmt.Printf("fingerprint %s\n", id.DeviceID().Fingerprint())
@@ -80,6 +88,18 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if stunErr != nil {
+		log.Printf("not answering STUN on %s: %v (devices behind NAT will stay on the relay)", *listen, stunErr)
+	} else {
+		defer stunConn.Close()
+		fmt.Printf("answering STUN on %s/udp\n", stunConn.LocalAddr())
+		go func() {
+			if err := path.ServeSTUN(ctx, stunConn); err != nil {
+				log.Printf("stun: %v", err)
+			}
+		}()
+	}
 
 	if err := srv.Serve(ctx, ln); err != nil {
 		log.Fatalf("serve: %v", err)

@@ -4,14 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
-	"github.com/shreyashsri79/openair/internal/conn"
 	"github.com/shreyashsri79/openair/internal/discovery"
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/ipc"
@@ -195,18 +194,22 @@ func (d *Daemon) dialFirst(ctx context.Context, addrs []string) (session.Session
 	if len(addrs) == 0 {
 		return nil, errors.New("no address to dial")
 	}
-	dialer := conn.NewDialer(d.id, d.cfg.DisplayName, platform(), map[byte]session.Handler{
-		0:               d.pairs,
-		files.CapID:     d.files,
-		clipboard.CapID: d.clip,
-	})
 
 	var lastErr error
 	for _, addr := range addrs {
+		udpAddr, err := net.ResolveUDPAddr("udp", addr)
+		if err != nil {
+			lastErr = fmt.Errorf("dial %s: %w", addr, err)
+			continue
+		}
+		// Dialled out of the shared socket rather than one quic-go binds for
+		// itself. That is what M9 needs: a NAT mapping belongs to a port, and
+		// the port that gets punched has to be the port the session uses.
+		//
 		// An address is not an identity: nothing can be pinned before the
 		// handshake, so the key is learned from it and checked immediately
 		// afterwards. The zero Peer is what session.New reads as "unpinned".
-		sess, err := dialer.DialAddr(ctx, addr, identity.Peer{})
+		sess, err := d.endpoint.Dial(ctx, udpAddr, identity.Peer{})
 		if err == nil {
 			return sess, nil
 		}

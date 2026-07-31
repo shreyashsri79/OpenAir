@@ -106,6 +106,11 @@ type ListenOptions struct {
 	// OnAuthEvent receives every authorisation decision made for an inbound
 	// message, for the local session log PRD R4 requires.
 	OnAuthEvent func(session.AuthEvent)
+
+	// PathClass reports the class of path a peer is currently reached on
+	// (§7.2). ListenPacketConn fills it in from the packet conn when that conn
+	// knows; nil leaves the transport's own answer.
+	PathClass func(identity.DeviceID) string
 }
 
 // Listen binds addr (use ":0" for an ephemeral port) and returns a Listener
@@ -211,6 +216,7 @@ func (l *listener) handshake(qc *quic.Conn) {
 		Authorize:   l.opts.Authorize,
 		PeerLookup:  l.opts.PeerLookup,
 		OnAuthEvent: l.opts.OnAuthEvent,
+		PathClass:   l.opts.PathClass,
 	})
 	if err != nil {
 		// A refusal that is not a protocol error is the authorize callback

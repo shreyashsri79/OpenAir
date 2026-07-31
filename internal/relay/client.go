@@ -251,6 +251,12 @@ func (pc *PacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 // LocalAddr is this device, as the relay knows it.
 func (pc *PacketConn) LocalAddr() net.Addr { return Addr{DeviceID: pc.local} }
 
+// Class reports §7.2's path class for anything carried here, which is always
+// "relayed": every packet on this conn takes the extra hop by definition. The
+// method exists so that conn.ListenPacketConn can ask a packet conn what it is
+// carrying instead of guessing (M9).
+func (pc *PacketConn) Class(identity.DeviceID) string { return "relayed" }
+
 // Close ends the relay connection.
 func (pc *PacketConn) Close() error {
 	pc.once.Do(func() {

@@ -31,6 +31,7 @@ import (
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/ipc"
 	"github.com/shreyashsri79/openair/internal/pairing"
+	"github.com/shreyashsri79/openair/internal/path"
 	"github.com/shreyashsri79/openair/internal/rendezvous"
 	"github.com/shreyashsri79/openair/internal/session"
 	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
@@ -91,6 +92,13 @@ type Config struct {
 	// (M8, §17). Empty disables it.
 	Relay RelayConfig
 
+	// STUN lists servers to ask for this device's reflexive address before
+	// punching (M9, §18). Empty means "the rendezvous server", which answers
+	// STUN on its own port (D-68), and nothing at all if none is configured:
+	// a device with only its LAN addresses can still punch on a LAN and is
+	// otherwise reachable through the relay.
+	STUN []string
+
 	Logf func(format string, args ...any)
 
 	// Discovery carries the test-only knobs that keep two daemons inside one
@@ -109,17 +117,27 @@ type DiscoveryOptions struct {
 
 // Daemon is one running instance.
 type Daemon struct {
-	cfg     Config
-	keyDir  string
-	id      *identity.FileIdentity
-	store   *identity.FileTrustStore
-	pairs   *pairing.Handler
-	files   *files.Capability
-	clip    *clipboard.Capability
-	ln      conn.Listener
-	ipcLn   net.Listener
-	disco   *discovery.Discovery
-	started time.Time
+	cfg      Config
+	keyDir   string
+	id       *identity.FileIdentity
+	store    *identity.FileTrustStore
+	pairs    *pairing.Handler
+	files    *files.Capability
+	clip     *clipboard.Capability
+	endpoint *conn.Endpoint
+	ln       conn.Listener
+	ipcLn    net.Listener
+	disco    *discovery.Discovery
+	started  time.Time
+
+	// paths is the one UDP socket this device uses for everything: listening,
+	// dialling, STUN and punch probes (M9). Sharing it is not tidiness -- a
+	// punch opens a mapping for the port the probes leave from, so the QUIC
+	// traffic has to leave from that same port or the mapping is for nothing.
+	paths *path.Conn
+
+	// punches tracks punch exchanges in flight, keyed by §18's punch_token.
+	punches map[string]chan *openairv1.PunchReady
 
 	// rendezvous is nil unless one is configured. Held under mu because Run
 	// installs it after New has returned.
@@ -198,6 +216,7 @@ func New(cfg Config) (*Daemon, error) {
 		started:  time.Now(),
 		sessions: map[identity.DeviceID]session.Session{},
 		clients:  map[*client]struct{}{},
+		punches:  map[string]chan *openairv1.PunchReady{},
 	}
 
 	d.pairs, err = pairing.NewHandler(pairing.Config{
@@ -227,16 +246,38 @@ func New(cfg Config) (*Daemon, error) {
 		OnReceive: d.onClipboardReceived,
 	})
 
+	// One socket, bound here rather than inside quic-go, because M9 needs to
+	// speak STUN and punch probes on the same port the QUIC traffic uses.
+	udp, err := net.ListenPacket("udp", cfg.Listen)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s: %w", cfg.Listen, err)
+	}
+	d.paths, err = path.New(path.Config{
+		Local: id.DeviceID(),
+		UDP:   udp,
+		Logf:  cfg.Logf,
+	})
+	if err != nil {
+		udp.Close()
+		return nil, err
+	}
+
+	// One endpoint, so that dialling and accepting share a single QUIC
+	// transport over that socket rather than two racing read loops (see
+	// conn.Endpoint).
+	//
 	// capID 0 is registered so a peer that revokes this device mid-session is
 	// honoured while a transfer is still running (§6.1).
-	d.ln, err = conn.Listen(cfg.Listen, id, cfg.DisplayName, platform(), d.handlers(), conn.ListenOptions{
+	d.endpoint, err = conn.NewEndpoint(d.paths, id, cfg.DisplayName, platform(), d.handlers(), conn.ListenOptions{
 		Authorize:   d.authorize,
 		PeerLookup:  d.store.Get,
 		OnAuthEvent: d.onAuthEvent,
 	})
 	if err != nil {
+		d.paths.Close()
 		return nil, fmt.Errorf("listen on %s: %w", cfg.Listen, err)
 	}
+	d.ln = d.endpoint.Listener()
 
 	d.ipcLn, err = ipc.Listen(cfg.SocketPath)
 	if err != nil {
@@ -325,8 +366,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 // more than once, which Run relies on.
 func (d *Daemon) Close() error {
 	d.closeOnce.Do(func() {
-		if d.ln != nil {
+		if d.endpoint != nil {
+			d.endpoint.Close()
+		} else if d.ln != nil {
 			d.ln.Close()
+		}
+		// The QUIC listener does not own the socket underneath it -- this
+		// daemon bound it, so this daemon closes it.
+		if d.paths != nil {
+			d.paths.Close()
 		}
 		if d.ipcLn != nil {
 			d.ipcLn.Close()
@@ -361,7 +409,7 @@ func (d *Daemon) Close() error {
 // honoured while a transfer is still running (§6.1).
 func (d *Daemon) handlers() map[byte]session.Handler {
 	return map[byte]session.Handler{
-		0:               d.pairs,
+		0:               &controlHandler{d: d},
 		files.CapID:     d.files,
 		clipboard.CapID: d.clip,
 	}
@@ -406,6 +454,10 @@ func (d *Daemon) register(sess session.Session) {
 		// reconnected without the first being noticed as dead.
 		_ = prev.Close(uint16(session.CodeNoError), "superseded by a new session")
 	}
+
+	// A session that came up over the relay is worth trying to move off it
+	// (M9, §18). Nothing happens for a session that is already direct.
+	d.maybeUpgrade(sess)
 
 	d.cfg.Logf("session with %s (%s)", peer.DeviceID.Fingerprint(), peer.DisplayName)
 	d.broadcast(&openairv1.DaemonEvent{

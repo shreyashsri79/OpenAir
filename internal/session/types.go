@@ -151,6 +151,18 @@ type Config struct {
 	// hook that makes that possible without the session layer owning a log
 	// format. It is called on the control loop, so it must not block.
 	OnAuthEvent func(AuthEvent)
+
+	// PathClass reports which kind of path currently carries this peer's
+	// packets -- "lan", "punched" or "relayed" (§7.2). It is a function rather
+	// than a value because the answer changes underneath a live session: M9
+	// upgrades a relayed path to a direct one without the connection above
+	// noticing, and a class captured at Hello would then be wrong for the rest
+	// of the session.
+	//
+	// Returning an empty string means "no better answer than the transport's",
+	// which is what a caller with no path layer should do. Nil is the same
+	// thing.
+	PathClass func(identity.DeviceID) string
 }
 
 // New wraps an established QUIC connection in a Session: it opens or accepts

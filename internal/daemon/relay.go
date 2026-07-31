@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shreyashsri79/openair/internal/conn"
 	"github.com/shreyashsri79/openair/internal/identity"
+	"github.com/shreyashsri79/openair/internal/path"
 	"github.com/shreyashsri79/openair/internal/relay"
 	"github.com/shreyashsri79/openair/internal/session"
 )
@@ -45,11 +45,14 @@ func ParseRelay(s string) (RelayConfig, error) {
 	return RelayConfig{Addr: rv.Addr, ServerID: rv.ServerID}, nil
 }
 
-// relayState is the live relay connection and the listener riding it.
+// relayState is the live relay connection and where it says this device lives.
+//
+// There is no listener here since M9: the relay conn is attached to the shared
+// path conn, and the one QUIC listener over that conn accepts direct, relayed
+// and punched peers alike. A peer arriving over the relay is the same peer.
 type relayState struct {
 	mu   sync.Mutex
 	pc   *relay.PacketConn
-	ln   conn.Listener
 	home string
 }
 
@@ -85,37 +88,27 @@ func (d *Daemon) runRelay(ctx context.Context) error {
 	}
 	defer pc.Close()
 
-	// Listening on the relay is not optional: a device that only dialled over
-	// it would be reachable by nobody, which is the case the relay exists for.
-	ln, err := conn.ListenPacketConn(pc, d.id, d.cfg.DisplayName, platform(), d.handlers(),
-		conn.ListenOptions{
-			Authorize:   d.authorize,
-			PeerLookup:  d.store.Get,
-			OnAuthEvent: d.onAuthEvent,
-		})
-	if err != nil {
-		return fmt.Errorf("listen over the relay: %w", err)
-	}
-	defer ln.Close()
+	// Attaching the relay to the path conn is what makes this device reachable
+	// through it: the existing QUIC listener sits on that conn, so relayed
+	// peers arrive on the same accept loop as direct ones and are subject to
+	// the same trust store and the same capabilities. It is also what lets M9
+	// move a peer off the relay later without touching the session.
+	d.paths.SetRelay(pc)
+	defer d.paths.SetRelay(nil)
 
 	d.relay.mu.Lock()
-	d.relay.pc, d.relay.ln = pc, ln
+	d.relay.pc = pc
 	d.relay.home = fmt.Sprintf("%s@%s", d.cfg.Relay.Addr, d.cfg.Relay.ServerID)
 	d.relay.mu.Unlock()
 
 	defer func() {
 		d.relay.mu.Lock()
-		d.relay.pc, d.relay.ln, d.relay.home = nil, nil, ""
+		d.relay.pc, d.relay.home = nil, ""
 		d.relay.mu.Unlock()
 	}()
 
 	d.cfg.Logf("reachable through relay %s (%s)",
 		d.cfg.Relay.Addr, d.cfg.Relay.ServerID.Fingerprint())
-
-	// Inbound relayed sessions are accepted exactly as direct ones are, so a
-	// peer arriving this way is subject to the same trust store and the same
-	// capabilities. A handshake failure is one peer, not the listener (D-52).
-	go d.acceptFrom(ctx, ln)
 
 	select {
 	case <-ctx.Done():
@@ -146,14 +139,16 @@ func (d *Daemon) relayHome() string {
 // has, and is still authenticated by its pinned key: a relay that forwarded to
 // the wrong device produces a failed handshake rather than a wrong session.
 func (d *Daemon) dialViaRelay(ctx context.Context, id identity.DeviceID) (session.Session, error) {
-	pc := d.relayPacketConn()
-	if pc == nil {
+	if d.relayPacketConn() == nil {
 		return nil, fmt.Errorf("no relay connection")
 	}
 	peer, ok := d.store.Get(id)
 	if !ok {
 		return nil, fmt.Errorf("%s is not paired with this device", id.Fingerprint())
 	}
-	return conn.DialPacketConn(ctx, pc, relay.Addr{DeviceID: id},
-		d.id, d.cfg.DisplayName, platform(), d.handlers(), peer)
+	// Dialled over the path conn rather than the relay conn directly, and
+	// addressed by path.Addr: the relay is where those packets go today, and
+	// the address stays the same when a punch moves them onto a direct path
+	// under a live session.
+	return d.endpoint.Dial(ctx, path.Addr{DeviceID: id}, peer)
 }

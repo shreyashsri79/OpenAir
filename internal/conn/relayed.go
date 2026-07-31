@@ -54,6 +54,7 @@ func DialPacketConn(ctx context.Context, pc net.PacketConn, remote net.Addr, loc
 		Platform:    platform,
 		Handlers:    handlers,
 		Initiator:   true,
+		PathClass:   pathClassOf(pc),
 	})
 	if err != nil {
 		return nil, translateRemoteClose(err)
@@ -80,5 +81,23 @@ func ListenPacketConn(pc net.PacketConn, local identity.Identity, displayName, p
 	if err != nil {
 		return nil, err
 	}
+	if opts.PathClass == nil {
+		opts.PathClass = pathClassOf(pc)
+	}
 	return newListener(ln, local, displayName, platform, handlers, opts), nil
+}
+
+// pathClassOf asks a packet conn which class of path it is carrying a peer on
+// (§7.2), if it is the kind of packet conn that knows.
+//
+// A relay conn or an M9 path conn does know: it chose the path. A UDP socket
+// does not, and gets nil, which leaves the transport's own answer in place.
+func pathClassOf(pc net.PacketConn) func(identity.DeviceID) string {
+	classifier, ok := pc.(interface {
+		Class(identity.DeviceID) string
+	})
+	if !ok {
+		return nil
+	}
+	return classifier.Class
 }

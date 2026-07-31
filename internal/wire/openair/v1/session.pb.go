@@ -44,6 +44,12 @@ const (
 	ControlMessageType_CONTROL_MESSAGE_TYPE_QUIESCE_REQUEST  ControlMessageType = 14
 	ControlMessageType_CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE  ControlMessageType = 15
 	ControlMessageType_CONTROL_MESSAGE_TYPE_PATH_INFO        ControlMessageType = 16
+	// Punch signalling (§18). The messages themselves are in infra.proto,
+	// because they are also the ones a rendezvous server would forward; these
+	// two values are how they travel over an existing session instead, which is
+	// the path §18 offers and the one that exists here (D-66).
+	ControlMessageType_CONTROL_MESSAGE_TYPE_PUNCH_REQUEST ControlMessageType = 17
+	ControlMessageType_CONTROL_MESSAGE_TYPE_PUNCH_READY   ControlMessageType = 18
 )
 
 // Enum value maps for ControlMessageType.
@@ -66,6 +72,8 @@ var (
 		14: "CONTROL_MESSAGE_TYPE_QUIESCE_REQUEST",
 		15: "CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE",
 		16: "CONTROL_MESSAGE_TYPE_PATH_INFO",
+		17: "CONTROL_MESSAGE_TYPE_PUNCH_REQUEST",
+		18: "CONTROL_MESSAGE_TYPE_PUNCH_READY",
 	}
 	ControlMessageType_value = map[string]int32{
 		"CONTROL_MESSAGE_TYPE_UNSPECIFIED":      0,
@@ -85,6 +93,8 @@ var (
 		"CONTROL_MESSAGE_TYPE_QUIESCE_REQUEST":  14,
 		"CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE":  15,
 		"CONTROL_MESSAGE_TYPE_PATH_INFO":        16,
+		"CONTROL_MESSAGE_TYPE_PUNCH_REQUEST":    17,
+		"CONTROL_MESSAGE_TYPE_PUNCH_READY":      18,
 	}
 )
 
@@ -271,7 +281,7 @@ const file_openair_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"Capability\x12(\n" +
 	"\x02id\x18\x01 \x01(\x0e2\x18.openair.v1.CapabilityIdR\x02id\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\rR\aversion*\xab\x05\n" +
+	"\aversion\x18\x02 \x01(\rR\aversion*\xf9\x05\n" +
 	"\x12ControlMessageType\x12$\n" +
 	" CONTROL_MESSAGE_TYPE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aCONTROL_MESSAGE_TYPE_HELLO\x10\x01\x12#\n" +
@@ -290,7 +300,9 @@ const file_openair_v1_session_proto_rawDesc = "" +
 	"!CONTROL_MESSAGE_TYPE_SESSION_KILL\x10\r\x12(\n" +
 	"$CONTROL_MESSAGE_TYPE_QUIESCE_REQUEST\x10\x0e\x12(\n" +
 	"$CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE\x10\x0f\x12\"\n" +
-	"\x1eCONTROL_MESSAGE_TYPE_PATH_INFO\x10\x10BEZCgithub.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1b\x06proto3"
+	"\x1eCONTROL_MESSAGE_TYPE_PATH_INFO\x10\x10\x12&\n" +
+	"\"CONTROL_MESSAGE_TYPE_PUNCH_REQUEST\x10\x11\x12$\n" +
+	" CONTROL_MESSAGE_TYPE_PUNCH_READY\x10\x12BEZCgithub.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1b\x06proto3"
 
 var (
 	file_openair_v1_session_proto_rawDescOnce sync.Once

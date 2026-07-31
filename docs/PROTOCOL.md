@@ -1031,14 +1031,40 @@ message PunchReady {
 ```
 
 Signalling travels over the rendezvous server or an existing relay session.
-`start_at` synchronises the spray, which is what makes symmetric-NAT traversal
-work at all often enough to matter; both sides MUST begin within about 50 ms of
-it and MUST NOT rely on their clocks being better than that.
+This implementation uses the session, as capID 0 control messages: §18 step 2
+guarantees one exists before there is anything to punch about, and a rendezvous
+server that forwards signalling needs a standing connection to every device
+(D-66).
+
+`start_at` cannot be read as an absolute instant. Requiring both sides to begin
+within 50 ms of a unix timestamp *is* relying on their clocks, which the same
+sentence forbids: two devices a minute apart would spray a minute apart. The
+spray is therefore triggered by the exchange itself — the responder begins when
+it sends `PunchReady`, the initiator when it receives one, which puts them
+within one one-way delay with no clock involved. `start_at` is honoured as a
+short "not before" hint and ignored when the local clock says it is more than a
+couple of seconds out, because past that it is measuring skew rather than
+intent (D-67).
+
+The probe packets themselves are not specified here. They are between two
+OpenAir peers and never reach a server, so they are an implementation matter;
+what matters protocol-side is that `punch_token` travels only inside the
+encrypted session, and that an address is accepted only when a probe sent *to*
+it comes back answered with that token — not merely because a probe arrived
+from it.
 
 Path selection is by measured RTT with hysteresis, so a marginally faster path
 does not cause migration flapping. Capabilities are never told which path they
 are on — only a `PathInfo` hint (§7.2), so that capability parity across paths
 stays structural rather than a per-feature obligation (PRD R8).
+
+Migration is not necessarily QUIC's own. A peer reached by DeviceID keeps one
+address across the change, and the path underneath it is switched below the QUIC
+stack — which is what makes the migration work in both directions and across a
+change of remote address, neither of which QUIC connection migration covers
+(D-69). Nothing above the transport can tell the difference, which is the
+property §17 depends on when it calls the relay a network element rather than a
+participant.
 
 ---
 
