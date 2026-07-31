@@ -15,13 +15,16 @@ import (
 )
 
 type recvOptions struct {
-	listen  string
-	dir     string
-	keys    string
-	yes     bool
-	once    bool              // stop after one completed transfer; used by tests
-	onReady func(addr string) // called with the bound address; used by tests
-	onDone  func(id string, ok bool)
+	listen      string
+	dir         string
+	keys        string
+	yes         bool
+	noAnnounce  bool              // do not advertise this device on the LAN (M3)
+	once        bool              // stop after one completed transfer; used by tests
+	onReady     func(addr string) // called with the bound address; used by tests
+	onDone      func(id string, ok bool)
+	disco       discoveryOptions // test-only; see discoveryOptions
+	onDiscovery func(unicastPort int)
 }
 
 func runRecv(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -32,6 +35,7 @@ func runRecv(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.StringVar(&o.dir, "dir", ".", "directory to write received files into")
 	fs.StringVar(&o.keys, "keys", "", "directory holding this device's keys")
 	fs.BoolVar(&o.yes, "yes", false, "accept any peer and any offer without asking")
+	fs.BoolVar(&o.noAnnounce, "no-announce", false, "do not advertise this device on the local network")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -118,6 +122,29 @@ func receive(ctx context.Context, o recvOptions, stdin io.Reader, stdout io.Writ
 
 	fmt.Fprintf(stdout, "this device: %s\n", fingerprint(id.DeviceID()))
 	fmt.Fprintf(stdout, "listening on %s, writing to %s\n", ln.Addr(), o.dir)
+
+	// Advertise the port actually bound, not the one requested: --listen :0 is
+	// how the tests bind, and announcing 0 would tell every peer to dial
+	// nothing. Discovery is best-effort -- a network with no multicast and no
+	// broadcast is not a reason to refuse to receive files.
+	if !o.noAnnounce {
+		port, err := portOf(ln.Addr())
+		if err != nil {
+			return err
+		}
+		d, err := startDiscovery(id.DeviceID(), port, o.disco,
+			func(format string, args ...any) { fmt.Fprintf(stdout, "discovery: "+format+"\n", args...) })
+		if err != nil {
+			fmt.Fprintf(stdout, "not advertising on the local network: %v\n", err)
+		} else {
+			defer d.Close()
+			fmt.Fprintf(stdout, "advertising as %q on the local network\n", hostname())
+			if o.onDiscovery != nil {
+				o.onDiscovery(d.UnicastPort())
+			}
+		}
+	}
+
 	if o.onReady != nil {
 		o.onReady(ln.Addr())
 	}

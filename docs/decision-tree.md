@@ -56,6 +56,8 @@ Legend: **green** = accepted · **orange** = open or needs a decision · **red**
 | D-44 | — | What does CI enforce? | **accepted** — build/vet/test/Windows/buf; netem manual |
 | D-45 | — | Is §5.2's SAS transcript fully specified? | **accepted** — three gaps filled; §5.2 and §6.4 need edits |
 | D-46 | — | How does a last message survive the close behind it? | **accepted** — 250 ms linger before close |
+| D-47 | — | What is the unicast fallback's byte layout? | **accepted** — defined here; §15.2 specifies none |
+| D-48 | — | May a process browse without announcing? | **accepted** — yes, `BrowseOnly` |
 
 **Open right now:** D-9 (media plane, Phase 4). D-10 is settled by D-31. Awaiting hardware: on-device Android throughput and battery (runbook in `oabench/androidkit/`). The Windows baseline is deferred to Phase 2 by D-32, though it remains a hard Phase 1 *exit* blocker. One optional refinement is flagged for the maintainer in D-30 — ephemeral per-peer delegation keys, which would make per-peer scope cryptographic rather than policy-enforced. Every decision gating Phase 1 is made and the trust store schema is fully determined. ADR-3 is fully resolved across D-18, D-19, D-20 and D-21, so the trust store schema is unblocked. D-16's queueing worry is answered by D-17; the port has now landed (D-35, D-36), so what remains is comparing BBRv1 against D-17's Cubic baseline.
 
@@ -134,6 +136,11 @@ flowchart TD
     Q6{"ADR-5<br/>How does Android run the core?"}:::question
     Q6 ==chosen==> D10["D-31 · gomobile-bound Go core, verified<br/>binds quic-go in 24 s, 8.4 MB per ABI,<br/>clean Java API with Go errors as exceptions.<br/>On-device throughput and battery still open"]:::accepted
     Q6 -.rejected.-> R6A["Kotlin reimplementation<br/>doubles the surface of a<br/>security-critical wire protocol<br/>and its audit burden"]:::rejected
+
+    Q8{"§15<br/>How are peers found on a LAN?"}:::question
+    Q8 ==chosen==> D47["D-47 · mDNS `_openair._udp` (§15.1) plus a<br/>unicast UDP beacon (§15.2), whose byte layout<br/>the spec never defined and this does.<br/>Query plus announce, answered unicast,<br/>so discovery converges in one round trip"]:::accepted
+    D47 --> D48["D-48 · a process with no listening port<br/>browses without announcing;<br/>announcing one anyway publishes an address<br/>that refuses every connection to it"]:::accepted
+    D47 -.constrained by.-> D47N["a candidate is unauthenticated.<br/>Discovery never dials; the pinned-key<br/>handshake is what decides"]:::evidence
 
     Q7{"ADR-6<br/>Keep consensus and replication?"}:::question
     Q7 ==chosen==> D11["D-11 · dropped<br/>every capability is a pairwise session;<br/>pairwise needs no agreement protocol"]:::accepted
@@ -896,3 +903,44 @@ Decision: a message that ends the conversation waits `notifyLinger` — 250 ms �
 Alternatives considered: draining the control stream to EOF before closing, as `oabench` does (rejected here — the peer is not obliged to close its side promptly, so the drain has no bound; the same reasoning does not apply to `oabench`, where both ends are the same program). Not closing at all and letting the peer close on receipt (rejected as the sole mechanism — it is the normal path and does happen, but a peer that ignores the message would leave the session open indefinitely; the local close is the fallback). Making enforcement depend on delivery (rejected outright — §6.3 already establishes that enforcement is local and `SessionKill` is a courtesy, which is why the trust store and the live `Guard` are both updated *before* the message goes out; the linger only decides whether the peer is *told*, never whether the revoke took effect).
 
 Consequences: `Revoke` blocks its caller for a quarter of a second on a deliberate user action, which is not worth engineering around. The real limitation is that 250 ms is a heuristic, not a guarantee — a peer on a slow path can still miss the notification, and the design has to stay correct when it does. It is: the revoking side has already deleted the record and lowered the guard, so a peer that never hears about it is refused on its next operation regardless. **A general fix belongs in the session layer, not here** — something like a `CloseAfterFlush` on `session.Session` that waits for the control stream's write side to be acknowledged. M4's daemon will want it, since every capability that ends a conversation has this problem.
+
+## D-47: The unicast discovery fallback needed a byte layout, and PROTOCOL.md §15.2 does not give one
+Date: 2026-07-31
+Status: accepted
+
+Context: §15.1 specifies mDNS discovery precisely — service type `_openair._udp`, four TXT keys, `id` / `v` / `port` / `n`. §15.2 says only that where multicast is unavailable a peer MAY fall back to unicast probes of known-last-good addresses and MAY broadcast an announce. That is a description of intent, not a format: two implementations reading it would not interoperate, because there is nothing to agree on.
+
+Decision: define it, in `internal/discovery/announce.go`, and write it back into §15.2.
+
+```
+ 0       4     5     6
++-------+-----+-----+------------------------------+
+| "OA2D"| ver | typ | n * (uint8 len, len bytes)   |
++-------+-----+-----+------------------------------+
+```
+
+Body is the same `key=value` strings the TXT record carries, length-prefixed rather than newline-separated because a display name may contain anything. Two types: an announce, and a query carrying only the asker's DeviceID. Port 53318, deliberately **not** 5353 — the fallback exists for networks that filter multicast, and reusing the mDNS port puts it behind the same filter.
+
+Three properties worth stating, because each was a choice:
+
+- **A query is answered unicast to the asker, not broadcast.** Nobody else asked, and it makes discovery converge in one round trip instead of one beacon interval — which is most of PRD R6's three-second budget.
+- **The self-filter is by DeviceID, not by comparing addresses against this host's interfaces** (v1.0's approach). That is what lets two instances on one machine see each other, which v1.0 could not represent and every test in this package depends on.
+- **Every length is checked before it is used to slice.** This reads from an unauthenticated UDP socket that anyone on the network can write to, so a datagram claiming a 200-byte field in a 10-byte packet is rejected rather than panicking. Unparseable datagrams are dropped silently: logging each one would be a log amplification vector.
+
+Alternatives considered: reusing protobuf, as the session layer does (rejected — this is four short strings on a socket that has no session and no negotiated version, and adding a schema dependency to reach it buys nothing). Broadcasting the answer to a query (rejected — it doubles traffic on every network where it works and tells devices that did not ask). Omitting the query and relying on periodic announces alone (rejected — a device that starts between two beacons waits a full interval, which spends R6's budget on nothing).
+
+Consequences: **§15.2 needs this written into it** before any second implementation exists — it is wire-visible, and the current text cannot be implemented twice compatibly. `_openair._udp` also means a v1.0 device on `_tcp` and a v2 device are mutually invisible, which is intended: they share no wire protocol, so seeing each other could only produce a failed connection.
+
+## D-48: A process that is not accepting sessions browses without announcing
+Date: 2026-07-31
+Status: accepted
+
+Context: `openair send laptop` and `openair discover` both need to hear what is on the network, and neither is listening for inbound sessions. The discovery config as first written required a port, because an announce without one is meaningless — so a browsing process would have had to invent a port and publish it.
+
+Decision: `Config.BrowseOnly`. It sends queries and listens, never announces, never answers a query, and does not require a port. `recv` announces the port it actually bound; `send` and `discover` browse.
+
+Rationale: announcing a port this process is not listening on publishes an address that refuses every connection made to it. Peers would show the device in their list, dial it, and fail — and the failure would look like a network problem rather than a lie. A device that cannot be connected to should not appear connectable.
+
+Alternatives considered: announcing the default port 9000 regardless (rejected for the reason above; it is only correct by accident, when a daemon happens to be listening on the same machine). Having `send` skip discovery entirely and require an address (rejected — it is exactly the typing M3 exists to remove). Announcing with a zero port and letting peers filter (rejected — it pushes a rule into every consumer instead of not saying the thing).
+
+Consequences: `recv` advertises the bound port rather than the requested one, so `--listen :0` works and does not tell peers to dial port zero. When M4's daemon arrives it is the only listening process, so it becomes the only announcer, and the CLI browsing beside it stays correct with no change.

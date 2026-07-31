@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/shreyashsri79/openair/internal/caps/files"
 	"github.com/shreyashsri79/openair/internal/conn"
@@ -18,9 +20,14 @@ import (
 // question from the trust store, and a device that is not paired is refused
 // rather than prompted about.
 type sendOptions struct {
-	addr  string
-	paths []string
-	keys  string
+	// addr is what the user typed: either an explicit host:port, or a device
+	// name or fingerprint prefix to resolve on the local network (M3).
+	addr    string
+	paths   []string
+	keys    string
+	timeout time.Duration // how long to look for a named device; zero means 5s
+
+	disco discoveryOptions // test-only; see discoveryOptions
 }
 
 func runSend(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -28,13 +35,14 @@ func runSend(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	var o sendOptions
 	fs.StringVar(&o.keys, "keys", "", "directory holding this device's keys")
+	fs.DurationVar(&o.timeout, "timeout", 5*time.Second, "how long to look for a named device on the network")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	rest := fs.Args()
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: openair send [flags] FILE... ADDR")
+		return fmt.Errorf("usage: openair send [flags] FILE... DEVICE|ADDR")
 	}
 	o.paths, o.addr = rest[:len(rest)-1], rest[len(rest)-1]
 
@@ -78,6 +86,11 @@ func send(ctx context.Context, o sendOptions, stdin io.Reader, stdout io.Writer)
 
 	fmt.Fprintf(stdout, "this device: %s\n", fingerprint(id.DeviceID()))
 
+	addrs, err := targetAddrs(ctx, o, id, stdout)
+	if err != nil {
+		return err
+	}
+
 	d := conn.NewDialer(id, hostname(), platform(),
 		map[byte]session.Handler{files.CapID: cap, 0: pairHandler})
 
@@ -85,9 +98,13 @@ func send(ctx context.Context, o sendOptions, stdin io.Reader, stdout io.Writer)
 	// handshake: the key is learned from it and checked against the trust store
 	// immediately afterwards. identity.Peer's zero value is what session.New
 	// treats as "unpinned".
-	sess, err := d.DialAddr(ctx, o.addr, identity.Peer{})
+	//
+	// A discovered device may advertise several addresses -- wired and
+	// wireless, IPv4 and IPv6 -- and only trying them in turn tells us which
+	// one is actually routable from here.
+	sess, err := dialFirst(ctx, d, addrs)
 	if err != nil {
-		return fmt.Errorf("dial %s: %w", o.addr, err)
+		return err
 	}
 	defer sess.Close(0, "done")
 
@@ -109,4 +126,51 @@ func send(ctx context.Context, o sendOptions, stdin io.Reader, stdout io.Writer)
 	}
 	fmt.Fprintf(stdout, "\ntransfer %s complete\n", transferID)
 	return nil
+}
+
+// targetAddrs turns the target the user gave into addresses to try, starting
+// discovery only when it is actually needed.
+func targetAddrs(ctx context.Context, o sendOptions, id *identity.FileIdentity, stdout io.Writer) ([]string, error) {
+	if isHostPort(o.addr) {
+		return []string{o.addr}, nil
+	}
+
+	// Browse only: this process is not accepting sessions, so it has no port
+	// worth announcing.
+	d, err := startDiscovery(id.DeviceID(), 0, o.disco, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%q is not a host:port and discovery is unavailable: %w", o.addr, err)
+	}
+	defer d.Close()
+
+	timeout := o.timeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return resolveTarget(lookupCtx, d, o.addr, stdout)
+}
+
+// dialFirst tries each address in turn and returns the first session that comes
+// up.
+//
+// A key mismatch stops the loop immediately rather than moving to the next
+// address: it means the device answering is not the one we pinned, and trying
+// its other advertised addresses would just ask the same impostor twice
+// (PROTOCOL.md §2).
+func dialFirst(ctx context.Context, d conn.Dialer, addrs []string) (session.Session, error) {
+	var lastErr error
+	for _, addr := range addrs {
+		sess, err := d.DialAddr(ctx, addr, identity.Peer{})
+		if err == nil {
+			return sess, nil
+		}
+		if errors.Is(err, identity.ErrKeyMismatch) {
+			return nil, fmt.Errorf("dial %s: %w", addr, err)
+		}
+		lastErr = fmt.Errorf("dial %s: %w", addr, err)
+	}
+	return nil, lastErr
 }

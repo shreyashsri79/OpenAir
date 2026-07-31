@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -397,4 +399,169 @@ func TestConfirmRequiresExplicitYes(t *testing.T) {
 			t.Errorf("confirm(%q) = %v, want %v", tc.in, got, tc.want)
 		}
 	}
+}
+
+// TestSendByDeviceName is M3's headline, end to end through the CLI: a file
+// moves with no address typed anywhere.
+//
+// The two instances are pointed at each other's unicast port rather than
+// broadcasting, so a `go test` run does not announce the maintainer's machine
+// to whatever network it happens to be on. That is the only thing this rigs;
+// the resolution path, the dial and the transfer are the real ones.
+func TestSendByDeviceName(t *testing.T) {
+	const payload = "discovered and delivered"
+
+	sendDir, recvDir := t.TempDir(), t.TempDir()
+	srcPath := filepath.Join(sendDir, "found.txt")
+	if err := os.WriteFile(srcPath, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	senderKeys, receiverKeys := t.TempDir(), t.TempDir()
+	_, receiverID := pairKeyDirs(t, senderKeys, receiverKeys)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	recvUnicast, senderUnicast := freeUDPPort(t), freeUDPPort(t)
+
+	ready := make(chan string, 1)
+	announcing := make(chan int, 1)
+	recvErr := make(chan error, 1)
+	var recvOut lockedBuffer
+	go func() {
+		recvErr <- receive(ctx, recvOptions{
+			listen:  "127.0.0.1:0",
+			dir:     recvDir,
+			keys:    receiverKeys,
+			yes:     true,
+			once:    true,
+			onReady: func(addr string) { ready <- addr },
+			disco: discoveryOptions{
+				disableMDNS:      true,
+				disableBroadcast: true,
+				unicastPort:      recvUnicast,
+				unicastPeers:     []string{"127.0.0.1:" + strconv.Itoa(senderUnicast)},
+			},
+			onDiscovery: func(port int) { announcing <- port },
+		}, strings.NewReader(""), &recvOut)
+	}()
+
+	select {
+	case <-ready:
+	case err := <-recvErr:
+		t.Fatalf("receiver exited before it was ready: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("receiver did not bind within 15s")
+	}
+	select {
+	case <-announcing:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("receiver never started advertising\n%s", recvOut.String())
+	}
+
+	// The target is the receiver's fingerprint prefix -- no host, no port.
+	target := string(receiverID)[:8]
+
+	var sendOut bytes.Buffer
+	err := send(ctx, sendOptions{
+		addr:    target,
+		paths:   []string{srcPath},
+		keys:    senderKeys,
+		timeout: 20 * time.Second,
+		disco: discoveryOptions{
+			disableMDNS:      true,
+			disableBroadcast: true,
+			unicastPort:      senderUnicast,
+			unicastPeers:     []string{"127.0.0.1:" + strconv.Itoa(recvUnicast)},
+		},
+	}, strings.NewReader(""), &sendOut)
+	if err != nil {
+		t.Fatalf("send by name: %v\nsender output:\n%s\nreceiver output:\n%s",
+			err, sendOut.String(), recvOut.String())
+	}
+
+	select {
+	case err := <-recvErr:
+		if err != nil {
+			t.Fatalf("receive: %v\n%s", err, recvOut.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("receiver did not finish\n%s", recvOut.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(recvDir, "found.txt"))
+	if err != nil {
+		t.Fatalf("read received file: %v", err)
+	}
+	if string(got) != payload {
+		t.Fatalf("received %q, want %q", got, payload)
+	}
+	if !strings.Contains(sendOut.String(), "looking for") {
+		t.Errorf("sender never reported a lookup:\n%s", sendOut.String())
+	}
+}
+
+// A name nobody answers to has to fail with something a user can act on, and
+// must not fall through to some default address.
+func TestSendByNameFailsWhenNobodyAnswers(t *testing.T) {
+	srcPath := filepath.Join(t.TempDir(), "f.txt")
+	if err := os.WriteFile(srcPath, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var out bytes.Buffer
+	err := send(ctx, sendOptions{
+		addr:    "no-such-device",
+		paths:   []string{srcPath},
+		keys:    t.TempDir(),
+		timeout: 500 * time.Millisecond,
+		disco: discoveryOptions{
+			disableMDNS:      true,
+			disableBroadcast: true,
+			unicastPort:      freeUDPPort(t),
+		},
+	}, strings.NewReader(""), &out)
+	if err == nil {
+		t.Fatal("send succeeded against a device that does not exist")
+	}
+	if !strings.Contains(err.Error(), "no-such-device") {
+		t.Errorf("error = %v, want it to name what was not found", err)
+	}
+}
+
+func TestIsHostPort(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{"10.0.0.5:9000", true},
+		{"[fd00::1]:9000", true},
+		{"laptop:9000", true},
+		{":9000", true},
+		{"laptop", false},
+		{"e2bv5in6ds75gci6", false},
+		{"e2bv-5in6-ds75-gci6", false},
+		{"10.0.0.5", false},
+		{"", false},
+	} {
+		if got := isHostPort(tc.in); got != tc.want {
+			t.Errorf("isHostPort(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// freeUDPPort mirrors the discovery package's helper: these tests point two
+// instances at each other rather than broadcasting.
+func freeUDPPort(t *testing.T) int {
+	t.Helper()
+	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("probe for a free port: %v", err)
+	}
+	defer c.Close()
+	return c.LocalAddr().(*net.UDPAddr).Port
 }
