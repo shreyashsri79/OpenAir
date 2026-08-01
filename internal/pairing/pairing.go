@@ -385,6 +385,18 @@ func (h *Handler) settle(ctx context.Context, sess session.Session, ex *exchange
 		return identity.Peer{}, ErrPeerDeclined
 	}
 
+	// An accept ends the exchange too, and it has the same problem the decline
+	// had: this side returns the moment the peer's PairConfirm arrives, its
+	// caller closes the session, and CONNECTION_CLOSE overtakes *our own*
+	// PairConfirm if the peer has not read it yet. The peer then waits out the
+	// full two-minute timeout having very nearly paired -- observed as one
+	// device reporting success while the other hung (D-86).
+	//
+	// Nothing on the wire acknowledges the last message of a symmetric
+	// exchange, so the fix is the same linger D-46 established, applied to the
+	// path that succeeds rather than only the one that fails.
+	time.Sleep(notifyLinger)
+
 	// §5.2: pairing completes only when both peers send accepted = true. Both
 	// keys are then pinned and the peer is recorded at Trusted. Promotion to
 	// Owned is a separate deliberate act (PRD R3) and never happens here.
