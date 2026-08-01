@@ -56,6 +56,8 @@ enum DaemonMessageType {
   DAEMON_MESSAGE_TYPE_STREAM_RESPONSE = 32;
   DAEMON_MESSAGE_TYPE_INPUT_REQUEST = 33;
   DAEMON_MESSAGE_TYPE_INPUT_RESPONSE = 34;
+  DAEMON_MESSAGE_TYPE_MIRROR_REQUEST = 35;
+  DAEMON_MESSAGE_TYPE_MIRROR_RESPONSE = 36;
 }
 
 // DaemonStatusRequest asks what the daemon is and what it is doing.
@@ -394,6 +396,28 @@ message InputScroll {
 message DaemonInputResponse {
   uint64 request_id = 1;
   uint32 sent = 2;  // events put on the wire
+  string error = 3;
+}
+
+// DaemonMirrorRequest watches another device's screen (M15, §14).
+//
+// What comes back is a loopback URL, the same arrangement M11 uses for a remote
+// file: every media player already decodes H.264 from a URL, so the frames the
+// daemon reassembles are handed to one rather than to a window this project
+// would have to build.
+message DaemonMirrorRequest {
+  uint64 request_id = 1;
+  string device = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  uint32 fps = 5;
+  uint32 bitrate = 6;  // bytes/sec
+  bool stop = 7;
+}
+
+message DaemonMirrorResponse {
+  uint64 request_id = 1;
+  string url = 2;
   string error = 3;
 }
 

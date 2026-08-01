@@ -953,6 +953,15 @@ frames to `RESET_STREAM`, because a path's usable rate for *realtime* video is
 far below its throughput. A source that ignores the hint shows a viewer a
 fraction of the frames it believes it is sending.
 
+**Authorisation.** `mirror` is announced before it starts (§6.3), and that
+announcement is where the Owned proof travels — the same arrangement `input`
+uses and for a related reason: frames flow source-to-sink, so requiring a proof
+per message would demand one from the source for its own frames, when the party
+that must prove anything is the sink (D-82). A source MUST refuse a
+`MirrorStart` with no live announcement behind it, and sharing a screen MUST be
+opt-in on the source. This implementation refuses the announcement itself when
+it is off, so a viewer is told rather than left watching an empty stream.
+
 Screen capture on Android requires per-session user consent by OS policy
 (PRD K6); fully unattended mirroring of an Android target may be impossible and
 this protocol does not attempt to work around it.

@@ -72,6 +72,7 @@ type streamServer struct {
 	srv     *http.Server
 	streams map[string]*streamEntry // token to entry
 	byPath  map[string]string       // device\x00path to token
+	live    map[string]*mirrorView  // token to a live mirror session (M15)
 	cache   *remotefs.Cache
 	cacheAt string
 }
@@ -195,6 +196,7 @@ func (d *Daemon) streamer() (*streamServer, error) {
 		d:       d,
 		streams: make(map[string]*streamEntry),
 		byPath:  make(map[string]string),
+		live:    make(map[string]*mirrorView),
 	}
 	// Loopback only. This is not a file server for the network; it is a bridge
 	// between one player and one daemon on one machine.
@@ -294,6 +296,14 @@ func (s *streamServer) withdraw(device, remotePath string) bool {
 	return true
 }
 
+// publishLive registers a mirror session at a token, so a player opening the
+// URL gets frames as they arrive rather than a file.
+func (s *streamServer) publishLive(token string, view *mirrorView) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.live[token] = view
+}
+
 // url is the loopback address of one token. The file's base name is on the end
 // because players read the extension: without it, some of them refuse to guess
 // a demuxer.
@@ -303,7 +313,11 @@ func (s *streamServer) url(token string) string {
 	addr := s.ln.Addr().String()
 	s.mu.Unlock()
 
-	name := "stream"
+	name := "screen.h264"
+	if e == nil {
+		return "http://" + addr + "/s/" + token + "/" + name
+	}
+	name = "stream"
 	if e != nil {
 		if base := path.Base(e.path); base != "." && base != "/" {
 			name = base
@@ -323,7 +337,15 @@ func (s *streamServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	e := s.streams[token]
+	view := s.live[token]
 	s.mu.Unlock()
+
+	if view != nil {
+		// A mirror session: frames as they arrive, for as long as the player
+		// keeps reading (M15).
+		view.serveLive(w, r)
+		return
+	}
 	if e == nil {
 		// No hint about whether the token was wrong or expired: a caller
 		// guessing tokens learns nothing either way.

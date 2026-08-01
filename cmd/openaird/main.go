@@ -48,6 +48,12 @@ func main() {
 		"rendezvous server as host:port@deviceid, so paired devices can find this one across networks")
 	relayAddr := flag.String("relay", "",
 		"relay server as host:port@deviceid, to stay reachable where no direct path works")
+	flag.BoolVar(&cfg.ShareScreen, "share-screen", false,
+		"let paired owned devices watch this machine's screen (M15, §14; off by default)")
+	mirrorCommand := flag.String("mirror-command", "",
+		"capture and encode command producing Annex-B H.264 on stdout; needed on Wayland, where ffmpeg cannot open a portal on its own")
+	flag.StringVar(&cfg.MirrorDisplay, "mirror-display", "",
+		"which display to capture (X11 \":0.0\", macOS index)")
 	flag.BoolVar(&cfg.AcceptInput, "accept-input", false,
 		"let paired owned devices drive this machine's keyboard and pointer (M14, §13; off by default)")
 	shares := flag.String("share", "",
@@ -74,6 +80,9 @@ func main() {
 	}
 	cfg.Relay = relayCfg
 	cfg.Shares = parseShares(*shares)
+	if *mirrorCommand != "" {
+		cfg.MirrorCommand = strings.Fields(*mirrorCommand)
+	}
 	cfg.NotifyAllow = splitList(*notifyAllow)
 	cfg.NotifyBlock = splitList(*notifyBlock)
 	cfg.STUN = splitList(*stunServers)

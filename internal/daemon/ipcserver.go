@@ -104,6 +104,8 @@ func (d *Daemon) handle(ctx context.Context, c *client, msgType uint16, payload 
 		d.onStream(ctx, c, payload)
 	case ipc.MsgInputRequest:
 		d.onInput(ctx, c, payload)
+	case ipc.MsgMirrorRequest:
+		d.onMirror(ctx, c, payload)
 	case ipc.MsgNotifyRequest:
 		d.onNotify(ctx, c, payload)
 	case ipc.MsgDismissRequest:

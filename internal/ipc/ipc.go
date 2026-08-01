@@ -76,6 +76,8 @@ const (
 	MsgStreamResponse     = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_STREAM_RESPONSE)
 	MsgInputRequest       = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_INPUT_REQUEST)
 	MsgInputResponse      = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_INPUT_RESPONSE)
+	MsgMirrorRequest      = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_MIRROR_REQUEST)
+	MsgMirrorResponse     = uint16(openairv1.DaemonMessageType_DAEMON_MESSAGE_TYPE_MIRROR_RESPONSE)
 )
 
 // isReply reports whether a message type answers an earlier request of ours.
@@ -94,7 +96,7 @@ func isReply(t uint16) bool {
 		MsgUnlockResponse, MsgLockResponse, MsgTrustResponse,
 		MsgBrowseResponse, MsgFetchResponse,
 		MsgNotifyResponse, MsgDismissResponse, MsgStreamResponse,
-		MsgInputResponse, MsgError:
+		MsgInputResponse, MsgMirrorResponse, MsgError:
 		return true
 	}
 	return false

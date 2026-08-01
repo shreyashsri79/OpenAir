@@ -280,6 +280,40 @@ func (c *Client) StopInput(ctx context.Context, device string) error {
 	return nil
 }
 
+// Mirror watches another device's screen and returns the loopback URL the
+// frames are published at (M15, §14).
+func (c *Client) Mirror(ctx context.Context, device string, width, height, fps, bitrate int) (string, error) {
+	var resp openairv1.DaemonMirrorResponse
+	req := &openairv1.DaemonMirrorRequest{
+		Device:  device,
+		Width:   uint32(width),
+		Height:  uint32(height),
+		Fps:     uint32(fps),
+		Bitrate: uint32(bitrate),
+	}
+	if err := c.peer.Do(ctx, ipc.MsgMirrorRequest, req, &resp); err != nil {
+		return "", err
+	}
+	if resp.GetError() != "" {
+		return "", errors.New(resp.GetError())
+	}
+	return resp.GetUrl(), nil
+}
+
+// StopMirror ends a mirror session, which lowers the indicator on the device
+// whose screen it was.
+func (c *Client) StopMirror(ctx context.Context, device string) error {
+	var resp openairv1.DaemonMirrorResponse
+	req := &openairv1.DaemonMirrorRequest{Device: device, Stop: true}
+	if err := c.peer.Do(ctx, ipc.MsgMirrorRequest, req, &resp); err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		return errors.New(resp.GetError())
+	}
+	return nil
+}
+
 // Notify mirrors a notification to a device, or to every connected device when
 // device is empty (M12, §12).
 //

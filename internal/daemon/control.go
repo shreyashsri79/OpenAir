@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/shreyashsri79/openair/internal/caps/input"
+	"github.com/shreyashsri79/openair/internal/caps/mirror"
 	"github.com/shreyashsri79/openair/internal/identity"
 	"github.com/shreyashsri79/openair/internal/session"
 	openairv1 "github.com/shreyashsri79/openair/internal/wire/openair/v1"
@@ -168,6 +169,9 @@ func (d *Daemon) acceptsAnnounced(peer identity.DeviceID, caps []byte) (bool, st
 		if c == input.CapID && !d.cfg.AcceptInput {
 			return false, "that device is not accepting remote input (its daemon was started without --accept-input)"
 		}
+		if c == mirror.CapID && !d.cfg.ShareScreen {
+			return false, "that device is not sharing its screen (its daemon was started without --share-screen)"
+		}
 	}
 	return true, ""
 }
@@ -234,6 +238,13 @@ func (d *Daemon) endAnnouncement(id string, peer identity.DeviceID, reason strin
 	// for those).
 	if d.input != nil {
 		d.input.Forget(a.peer.DeviceID)
+	}
+	// And a screen stops being shared. §6.3 says the enforcement of a kill is
+	// local refusal, so ending the announcement has to stop the capture as
+	// well as the authorisation -- otherwise "stop watching me" leaves an
+	// encoder running and frames flowing.
+	if d.mirrors != nil {
+		d.mirrors.StopSharingWith(a.peer.DeviceID)
 	}
 	if reason == "" {
 		reason = "ended"

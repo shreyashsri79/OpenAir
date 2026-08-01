@@ -70,6 +70,8 @@ const (
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_STREAM_RESPONSE      DaemonMessageType = 32
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_INPUT_REQUEST        DaemonMessageType = 33
 	DaemonMessageType_DAEMON_MESSAGE_TYPE_INPUT_RESPONSE       DaemonMessageType = 34
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_MIRROR_REQUEST       DaemonMessageType = 35
+	DaemonMessageType_DAEMON_MESSAGE_TYPE_MIRROR_RESPONSE      DaemonMessageType = 36
 )
 
 // Enum value maps for DaemonMessageType.
@@ -110,6 +112,8 @@ var (
 		32: "DAEMON_MESSAGE_TYPE_STREAM_RESPONSE",
 		33: "DAEMON_MESSAGE_TYPE_INPUT_REQUEST",
 		34: "DAEMON_MESSAGE_TYPE_INPUT_RESPONSE",
+		35: "DAEMON_MESSAGE_TYPE_MIRROR_REQUEST",
+		36: "DAEMON_MESSAGE_TYPE_MIRROR_RESPONSE",
 	}
 	DaemonMessageType_value = map[string]int32{
 		"DAEMON_MESSAGE_TYPE_UNSPECIFIED":          0,
@@ -147,6 +151,8 @@ var (
 		"DAEMON_MESSAGE_TYPE_STREAM_RESPONSE":      32,
 		"DAEMON_MESSAGE_TYPE_INPUT_REQUEST":        33,
 		"DAEMON_MESSAGE_TYPE_INPUT_RESPONSE":       34,
+		"DAEMON_MESSAGE_TYPE_MIRROR_REQUEST":       35,
+		"DAEMON_MESSAGE_TYPE_MIRROR_RESPONSE":      36,
 	}
 )
 
@@ -2626,6 +2632,164 @@ func (x *DaemonInputResponse) GetError() string {
 	return ""
 }
 
+// DaemonMirrorRequest watches another device's screen (M15, §14).
+//
+// What comes back is a loopback URL, the same arrangement M11 uses for a remote
+// file: every media player already decodes H.264 from a URL, so the frames the
+// daemon reassembles are handed to one rather than to a window this project
+// would have to build.
+type DaemonMirrorRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
+	Width         uint32                 `protobuf:"varint,3,opt,name=width,proto3" json:"width,omitempty"`
+	Height        uint32                 `protobuf:"varint,4,opt,name=height,proto3" json:"height,omitempty"`
+	Fps           uint32                 `protobuf:"varint,5,opt,name=fps,proto3" json:"fps,omitempty"`
+	Bitrate       uint32                 `protobuf:"varint,6,opt,name=bitrate,proto3" json:"bitrate,omitempty"` // bytes/sec
+	Stop          bool                   `protobuf:"varint,7,opt,name=stop,proto3" json:"stop,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonMirrorRequest) Reset() {
+	*x = DaemonMirrorRequest{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonMirrorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonMirrorRequest) ProtoMessage() {}
+
+func (x *DaemonMirrorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonMirrorRequest.ProtoReflect.Descriptor instead.
+func (*DaemonMirrorRequest) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *DaemonMirrorRequest) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonMirrorRequest) GetDevice() string {
+	if x != nil {
+		return x.Device
+	}
+	return ""
+}
+
+func (x *DaemonMirrorRequest) GetWidth() uint32 {
+	if x != nil {
+		return x.Width
+	}
+	return 0
+}
+
+func (x *DaemonMirrorRequest) GetHeight() uint32 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+func (x *DaemonMirrorRequest) GetFps() uint32 {
+	if x != nil {
+		return x.Fps
+	}
+	return 0
+}
+
+func (x *DaemonMirrorRequest) GetBitrate() uint32 {
+	if x != nil {
+		return x.Bitrate
+	}
+	return 0
+}
+
+func (x *DaemonMirrorRequest) GetStop() bool {
+	if x != nil {
+		return x.Stop
+	}
+	return false
+}
+
+type DaemonMirrorResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Url           string                 `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonMirrorResponse) Reset() {
+	*x = DaemonMirrorResponse{}
+	mi := &file_openair_v1_daemon_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonMirrorResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonMirrorResponse) ProtoMessage() {}
+
+func (x *DaemonMirrorResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_daemon_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonMirrorResponse.ProtoReflect.Descriptor instead.
+func (*DaemonMirrorResponse) Descriptor() ([]byte, []int) {
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *DaemonMirrorResponse) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *DaemonMirrorResponse) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *DaemonMirrorResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 // DaemonStreamRequest asks the daemon to serve a remote file over local HTTP
 // so that a media player can open it (M11, §11.2, §11.4).
 //
@@ -2644,7 +2808,7 @@ type DaemonStreamRequest struct {
 
 func (x *DaemonStreamRequest) Reset() {
 	*x = DaemonStreamRequest{}
-	mi := &file_openair_v1_daemon_proto_msgTypes[32]
+	mi := &file_openair_v1_daemon_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2656,7 +2820,7 @@ func (x *DaemonStreamRequest) String() string {
 func (*DaemonStreamRequest) ProtoMessage() {}
 
 func (x *DaemonStreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_daemon_proto_msgTypes[32]
+	mi := &file_openair_v1_daemon_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2669,7 +2833,7 @@ func (x *DaemonStreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonStreamRequest.ProtoReflect.Descriptor instead.
 func (*DaemonStreamRequest) Descriptor() ([]byte, []int) {
-	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{32}
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *DaemonStreamRequest) GetRequestId() uint64 {
@@ -2713,7 +2877,7 @@ type DaemonStreamResponse struct {
 
 func (x *DaemonStreamResponse) Reset() {
 	*x = DaemonStreamResponse{}
-	mi := &file_openair_v1_daemon_proto_msgTypes[33]
+	mi := &file_openair_v1_daemon_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2725,7 +2889,7 @@ func (x *DaemonStreamResponse) String() string {
 func (*DaemonStreamResponse) ProtoMessage() {}
 
 func (x *DaemonStreamResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_daemon_proto_msgTypes[33]
+	mi := &file_openair_v1_daemon_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2738,7 +2902,7 @@ func (x *DaemonStreamResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonStreamResponse.ProtoReflect.Descriptor instead.
 func (*DaemonStreamResponse) Descriptor() ([]byte, []int) {
-	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{33}
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *DaemonStreamResponse) GetRequestId() uint64 {
@@ -2789,7 +2953,7 @@ type DaemonNotifyRequest struct {
 
 func (x *DaemonNotifyRequest) Reset() {
 	*x = DaemonNotifyRequest{}
-	mi := &file_openair_v1_daemon_proto_msgTypes[34]
+	mi := &file_openair_v1_daemon_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2801,7 +2965,7 @@ func (x *DaemonNotifyRequest) String() string {
 func (*DaemonNotifyRequest) ProtoMessage() {}
 
 func (x *DaemonNotifyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_daemon_proto_msgTypes[34]
+	mi := &file_openair_v1_daemon_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2814,7 +2978,7 @@ func (x *DaemonNotifyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonNotifyRequest.ProtoReflect.Descriptor instead.
 func (*DaemonNotifyRequest) Descriptor() ([]byte, []int) {
-	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{34}
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DaemonNotifyRequest) GetRequestId() uint64 {
@@ -2850,7 +3014,7 @@ type DaemonNotifyResponse struct {
 
 func (x *DaemonNotifyResponse) Reset() {
 	*x = DaemonNotifyResponse{}
-	mi := &file_openair_v1_daemon_proto_msgTypes[35]
+	mi := &file_openair_v1_daemon_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2862,7 +3026,7 @@ func (x *DaemonNotifyResponse) String() string {
 func (*DaemonNotifyResponse) ProtoMessage() {}
 
 func (x *DaemonNotifyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_daemon_proto_msgTypes[35]
+	mi := &file_openair_v1_daemon_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2875,7 +3039,7 @@ func (x *DaemonNotifyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonNotifyResponse.ProtoReflect.Descriptor instead.
 func (*DaemonNotifyResponse) Descriptor() ([]byte, []int) {
-	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{35}
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *DaemonNotifyResponse) GetRequestId() uint64 {
@@ -2922,7 +3086,7 @@ type DaemonDismissRequest struct {
 
 func (x *DaemonDismissRequest) Reset() {
 	*x = DaemonDismissRequest{}
-	mi := &file_openair_v1_daemon_proto_msgTypes[36]
+	mi := &file_openair_v1_daemon_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2934,7 +3098,7 @@ func (x *DaemonDismissRequest) String() string {
 func (*DaemonDismissRequest) ProtoMessage() {}
 
 func (x *DaemonDismissRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_daemon_proto_msgTypes[36]
+	mi := &file_openair_v1_daemon_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2947,7 +3111,7 @@ func (x *DaemonDismissRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonDismissRequest.ProtoReflect.Descriptor instead.
 func (*DaemonDismissRequest) Descriptor() ([]byte, []int) {
-	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{36}
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *DaemonDismissRequest) GetRequestId() uint64 {
@@ -2995,7 +3159,7 @@ type DaemonDismissResponse struct {
 
 func (x *DaemonDismissResponse) Reset() {
 	*x = DaemonDismissResponse{}
-	mi := &file_openair_v1_daemon_proto_msgTypes[37]
+	mi := &file_openair_v1_daemon_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3007,7 +3171,7 @@ func (x *DaemonDismissResponse) String() string {
 func (*DaemonDismissResponse) ProtoMessage() {}
 
 func (x *DaemonDismissResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_daemon_proto_msgTypes[37]
+	mi := &file_openair_v1_daemon_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3020,7 +3184,7 @@ func (x *DaemonDismissResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonDismissResponse.ProtoReflect.Descriptor instead.
 func (*DaemonDismissResponse) Descriptor() ([]byte, []int) {
-	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{37}
+	return file_openair_v1_daemon_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *DaemonDismissResponse) GetRequestId() uint64 {
@@ -3255,6 +3419,20 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x12\n" +
 	"\x04sent\x18\x02 \x01(\rR\x04sent\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xba\x01\n" +
+	"\x13DaemonMirrorRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x16\n" +
+	"\x06device\x18\x02 \x01(\tR\x06device\x12\x14\n" +
+	"\x05width\x18\x03 \x01(\rR\x05width\x12\x16\n" +
+	"\x06height\x18\x04 \x01(\rR\x06height\x12\x10\n" +
+	"\x03fps\x18\x05 \x01(\rR\x03fps\x12\x18\n" +
+	"\abitrate\x18\x06 \x01(\rR\abitrate\x12\x12\n" +
+	"\x04stop\x18\a \x01(\bR\x04stop\"]\n" +
+	"\x14DaemonMirrorResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"t\n" +
 	"\x13DaemonStreamRequest\x12\x1d\n" +
 	"\n" +
@@ -3290,7 +3468,7 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\x15DaemonDismissResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error*\x84\v\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error*\xd5\v\n" +
 	"\x11DaemonMessageType\x12#\n" +
 	"\x1fDAEMON_MESSAGE_TYPE_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"DAEMON_MESSAGE_TYPE_STATUS_REQUEST\x10\x01\x12'\n" +
@@ -3327,7 +3505,9 @@ const file_openair_v1_daemon_proto_rawDesc = "" +
 	"\"DAEMON_MESSAGE_TYPE_STREAM_REQUEST\x10\x1f\x12'\n" +
 	"#DAEMON_MESSAGE_TYPE_STREAM_RESPONSE\x10 \x12%\n" +
 	"!DAEMON_MESSAGE_TYPE_INPUT_REQUEST\x10!\x12&\n" +
-	"\"DAEMON_MESSAGE_TYPE_INPUT_RESPONSE\x10\"*\xc0\x05\n" +
+	"\"DAEMON_MESSAGE_TYPE_INPUT_RESPONSE\x10\"\x12&\n" +
+	"\"DAEMON_MESSAGE_TYPE_MIRROR_REQUEST\x10#\x12'\n" +
+	"#DAEMON_MESSAGE_TYPE_MIRROR_RESPONSE\x10$*\xc0\x05\n" +
 	"\x0fDaemonEventKind\x12!\n" +
 	"\x1dDAEMON_EVENT_KIND_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eDAEMON_EVENT_KIND_DEVICE_FOUND\x10\x01\x12!\n" +
@@ -3367,7 +3547,7 @@ func file_openair_v1_daemon_proto_rawDescGZIP() []byte {
 }
 
 var file_openair_v1_daemon_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_openair_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_openair_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_openair_v1_daemon_proto_goTypes = []any{
 	(DaemonMessageType)(0),           // 0: openair.v1.DaemonMessageType
 	(DaemonEventKind)(0),             // 1: openair.v1.DaemonEventKind
@@ -3404,35 +3584,37 @@ var file_openair_v1_daemon_proto_goTypes = []any{
 	(*InputMove)(nil),                // 32: openair.v1.InputMove
 	(*InputScroll)(nil),              // 33: openair.v1.InputScroll
 	(*DaemonInputResponse)(nil),      // 34: openair.v1.DaemonInputResponse
-	(*DaemonStreamRequest)(nil),      // 35: openair.v1.DaemonStreamRequest
-	(*DaemonStreamResponse)(nil),     // 36: openair.v1.DaemonStreamResponse
-	(*DaemonNotifyRequest)(nil),      // 37: openair.v1.DaemonNotifyRequest
-	(*DaemonNotifyResponse)(nil),     // 38: openair.v1.DaemonNotifyResponse
-	(*DaemonDismissRequest)(nil),     // 39: openair.v1.DaemonDismissRequest
-	(*DaemonDismissResponse)(nil),    // 40: openair.v1.DaemonDismissResponse
-	(ProtectionTier)(0),              // 41: openair.v1.ProtectionTier
-	(TrustLevel)(0),                  // 42: openair.v1.TrustLevel
-	(*Posted)(nil),                   // 43: openair.v1.Posted
-	(*ClipboardPush)(nil),            // 44: openair.v1.ClipboardPush
-	(*FileStat)(nil),                 // 45: openair.v1.FileStat
+	(*DaemonMirrorRequest)(nil),      // 35: openair.v1.DaemonMirrorRequest
+	(*DaemonMirrorResponse)(nil),     // 36: openair.v1.DaemonMirrorResponse
+	(*DaemonStreamRequest)(nil),      // 37: openair.v1.DaemonStreamRequest
+	(*DaemonStreamResponse)(nil),     // 38: openair.v1.DaemonStreamResponse
+	(*DaemonNotifyRequest)(nil),      // 39: openair.v1.DaemonNotifyRequest
+	(*DaemonNotifyResponse)(nil),     // 40: openair.v1.DaemonNotifyResponse
+	(*DaemonDismissRequest)(nil),     // 41: openair.v1.DaemonDismissRequest
+	(*DaemonDismissResponse)(nil),    // 42: openair.v1.DaemonDismissResponse
+	(ProtectionTier)(0),              // 43: openair.v1.ProtectionTier
+	(TrustLevel)(0),                  // 44: openair.v1.TrustLevel
+	(*Posted)(nil),                   // 45: openair.v1.Posted
+	(*ClipboardPush)(nil),            // 46: openair.v1.ClipboardPush
+	(*FileStat)(nil),                 // 47: openair.v1.FileStat
 }
 var file_openair_v1_daemon_proto_depIdxs = []int32{
-	41, // 0: openair.v1.DaemonStatusResponse.protection_tier:type_name -> openair.v1.ProtectionTier
-	42, // 1: openair.v1.DaemonDevice.level:type_name -> openair.v1.TrustLevel
-	41, // 2: openair.v1.DaemonDevice.protection_tier:type_name -> openair.v1.ProtectionTier
+	43, // 0: openair.v1.DaemonStatusResponse.protection_tier:type_name -> openair.v1.ProtectionTier
+	44, // 1: openair.v1.DaemonDevice.level:type_name -> openair.v1.TrustLevel
+	43, // 2: openair.v1.DaemonDevice.protection_tier:type_name -> openair.v1.ProtectionTier
 	6,  // 3: openair.v1.DaemonDeviceListResponse.devices:type_name -> openair.v1.DaemonDevice
 	1,  // 4: openair.v1.DaemonEvent.kind:type_name -> openair.v1.DaemonEventKind
-	43, // 5: openair.v1.DaemonEvent.notification:type_name -> openair.v1.Posted
+	45, // 5: openair.v1.DaemonEvent.notification:type_name -> openair.v1.Posted
 	2,  // 6: openair.v1.DaemonPrompt.kind:type_name -> openair.v1.DaemonPromptKind
-	44, // 7: openair.v1.DaemonClipboardRequest.push:type_name -> openair.v1.ClipboardPush
-	41, // 8: openair.v1.DaemonUnlockResponse.protection_tier:type_name -> openair.v1.ProtectionTier
-	42, // 9: openair.v1.DaemonTrustRequest.level:type_name -> openair.v1.TrustLevel
-	42, // 10: openair.v1.DaemonTrustResponse.level:type_name -> openair.v1.TrustLevel
-	45, // 11: openair.v1.DaemonBrowseResponse.entries:type_name -> openair.v1.FileStat
+	46, // 7: openair.v1.DaemonClipboardRequest.push:type_name -> openair.v1.ClipboardPush
+	43, // 8: openair.v1.DaemonUnlockResponse.protection_tier:type_name -> openair.v1.ProtectionTier
+	44, // 9: openair.v1.DaemonTrustRequest.level:type_name -> openair.v1.TrustLevel
+	44, // 10: openair.v1.DaemonTrustResponse.level:type_name -> openair.v1.TrustLevel
+	47, // 11: openair.v1.DaemonBrowseResponse.entries:type_name -> openair.v1.FileStat
 	31, // 12: openair.v1.DaemonInputRequest.actions:type_name -> openair.v1.InputAction
 	32, // 13: openair.v1.InputAction.move:type_name -> openair.v1.InputMove
 	33, // 14: openair.v1.InputAction.scroll:type_name -> openair.v1.InputScroll
-	43, // 15: openair.v1.DaemonNotifyRequest.notification:type_name -> openair.v1.Posted
+	45, // 15: openair.v1.DaemonNotifyRequest.notification:type_name -> openair.v1.Posted
 	16, // [16:16] is the sub-list for method output_type
 	16, // [16:16] is the sub-list for method input_type
 	16, // [16:16] is the sub-list for extension type_name
@@ -3455,7 +3637,7 @@ func file_openair_v1_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_openair_v1_daemon_proto_rawDesc), len(file_openair_v1_daemon_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   38,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -4,10 +4,10 @@ package openair.v1;
 
 option go_package = "github.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1";
 
-// PROVISIONAL. ADR-4 (D-9) is open. The framing here reflects the current
-// leaning -- stream-per-frame with RESET_STREAM -- which D-24 made favourite by
-// removing the scheduling argument for datagrams. Expect this to change once
-// the D-9 spike runs.
+// Settled by measurement (D-84). Stream-per-frame with RESET_STREAM beat
+// datagrams by three times at the median on a relayed path and lost no frames
+// where datagrams lost one in thirty, because a keyframe is ~170 datagram
+// fragments and any one of them takes the whole frame with it.
 enum MirrorMessageType {
   MIRROR_MESSAGE_TYPE_UNSPECIFIED = 0;
   MIRROR_MESSAGE_TYPE_START = 1;

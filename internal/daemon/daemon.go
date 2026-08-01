@@ -27,6 +27,7 @@ import (
 	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
 	"github.com/shreyashsri79/openair/internal/caps/input"
+	"github.com/shreyashsri79/openair/internal/caps/mirror"
 	"github.com/shreyashsri79/openair/internal/caps/notifications"
 	"github.com/shreyashsri79/openair/internal/caps/remotefs"
 	"github.com/shreyashsri79/openair/internal/conn"
@@ -118,6 +119,24 @@ type Config struct {
 	// started.
 	AcceptInput bool
 
+	// ShareScreen lets a paired Owned device watch this machine's screen
+	// (M15, §14). Off by default and the hardest thing here to turn on: it is
+	// the most invasive capability in the protocol.
+	ShareScreen bool
+
+	// MirrorCommand overrides the capture and encode command line, and
+	// MirrorDisplay which display is captured. The command exists because
+	// screen capture is the least portable thing in this project -- a Wayland
+	// session needs a portal helper that ffmpeg cannot open on its own (D-85).
+	MirrorCommand []string
+	MirrorDisplay string
+
+	// MirrorCapturer overrides the capture backend, for the same reasons
+	// InputInjector does: a test machine has no screen, and a shell embedding
+	// this daemon may capture through its own platform rather than through
+	// ffmpeg.
+	MirrorCapturer func() (mirror.Capturer, error)
+
 	// InputInjector overrides the platform backend. It exists because the
 	// backend is a kernel device or a Windows API call, and a test cannot have
 	// either -- and because a shell embedding this daemon (the Android service,
@@ -171,6 +190,10 @@ type Daemon struct {
 	// by default (§13, PRD R25).
 	input *input.Capability
 
+	// mirrors is M15, in both directions: the screens this device shares and
+	// the ones it is watching.
+	mirrors *mirror.Capability
+
 	// clipState is M13's loop suppression, shared between the watcher and the
 	// receive path so that content applied from a peer is never sent back.
 	clipState *clipboard.SyncState
@@ -207,6 +230,12 @@ type Daemon struct {
 	// killedUntil is when a peer whose session a local user stopped may
 	// announce another one (§6.3, PRD R4).
 	killedUntil map[identity.DeviceID]time.Time
+
+	// views are the screens this device is watching, each published at a
+	// loopback URL, and mirrorSessions is the §6.3 announcement that
+	// authorised each one.
+	views          map[identity.DeviceID]*mirrorView
+	mirrorSessions map[identity.DeviceID]string
 
 	// controls are the control sessions this device holds over others (M14),
 	// and controlTargets remembers which device a target string resolved to so
@@ -359,6 +388,26 @@ func New(cfg Config) (*Daemon, error) {
 		Allowed:  d.inputAllowed,
 		OnEvent:  d.onInputEvent,
 		Logf:     cfg.Logf,
+	})
+
+	// M15. Like input, the capability is registered either way so that §4's
+	// symmetric negotiation lets this device *watch* another; whether it
+	// shares its own screen is mirrorAllowed's business, and needs
+	// --share-screen.
+	var capture func() (mirror.Capturer, error)
+	if cfg.ShareScreen {
+		capture = d.newCapturer
+		if cfg.MirrorCapturer != nil {
+			capture = cfg.MirrorCapturer
+		}
+	}
+	d.mirrors = mirror.New(mirror.Config{
+		Capture: capture,
+		Allowed: d.mirrorAllowed,
+		OnFrame: d.onMirrorFrame,
+		OnStart: d.onMirrorStart,
+		OnStop:  d.onMirrorStop,
+		Logf:    cfg.Logf,
 	})
 
 	d.clipState = clipboard.NewSyncState()
@@ -515,6 +564,11 @@ func (d *Daemon) Close() error {
 		if d.input != nil {
 			_ = d.input.Close()
 		}
+		// A screen still being shared when the daemon stops is a capture
+		// subprocess that outlives it, and an indicator nobody can lower.
+		if d.mirrors != nil {
+			d.mirrors.StopAll()
+		}
 		// A unix socket outlives its process unless removed. Leaving it behind
 		// makes the next start look like an already-running daemon.
 		if runtime.GOOS != "windows" {
@@ -553,6 +607,9 @@ func (d *Daemon) handlers() map[byte]session.Handler {
 	}
 	if d.input != nil {
 		h[input.CapID] = d.input
+	}
+	if d.mirrors != nil {
+		h[mirror.CapID] = d.mirrors
 	}
 	return h
 }
