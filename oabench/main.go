@@ -11,6 +11,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -33,6 +34,10 @@ func main() {
 		serve(os.Args[2:])
 	case "send":
 		send(os.Args[2:])
+	case "mirror-serve":
+		mirrorServe(os.Args[2:])
+	case "mirror":
+		mirror(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -46,6 +51,9 @@ func usage() {
 	fmt.Fprint(os.Stderr, `oabench - OpenAir transport benchmark
 
   oabench serve -transport tcp|quic [-addr :9100] [-sink PATH]
+  oabench mirror-serve [-addr :9100]
+  oabench mirror [-addr host:9100] [-mode stream|datagram] [-fps 60]
+                 [-bitrate 8Mbps] [-seconds 20] [-bulk] [-quiesce]
   oabench send  -transport tcp|quic [-addr host:9100] [-size 1GiB]
                 [-streams 1,2,4,8] [-chunk 1MiB] [-runs 3] [-profile NAME] [-probe]
 
@@ -162,4 +170,57 @@ func parseCounts(s string) ([]int, error) {
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+// mirrorServe runs the D-9 spike's sink.
+func mirrorServe(args []string) {
+	fs := flag.NewFlagSet("mirror-serve", flag.ExitOnError)
+	addr := fs.String("addr", ":9100", "listen address")
+	fs.Parse(args)
+
+	if err := bench.ServeMirror(*addr); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// mirror runs the D-9 spike's source: one framing, one duration, one row of
+// output. ADR-4 is decided on these numbers.
+func mirror(args []string) {
+	fs := flag.NewFlagSet("mirror", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:9100", "sink address")
+	mode := fs.String("mode", "stream", "stream (PROTOCOL.md §14.2) or datagram (ADR-4 option A)")
+	fps := fs.Int("fps", 60, "frames per second")
+	bitrate := fs.String("bitrate", "8Mb", "encoded video bitrate, in bits per second (8Mb is a 1080p screen share)")
+	seconds := fs.Int("seconds", 20, "how long to run")
+	keyframe := fs.Int("keyframe", 60, "frames between keyframes")
+	bulk := fs.Bool("bulk", false, "run a saturating transfer on the same connection (D-24's contention case)")
+	quiesce := fs.Bool("quiesce", false, "throttle the bulk sender to a floor, as the session layer does")
+	profile := fs.String("profile", "", "netem profile label recorded in the result")
+	label := fs.String("label", "", "free-form label recorded in the result")
+	fs.Parse(args)
+
+	// The flag is in bits per second, because that is how video bitrate is
+	// always quoted; everything below this line is bytes.
+	rate, err := bench.ParseBytes(strings.TrimSuffix(strings.TrimSuffix(*bitrate, "ps"), "b") + "B")
+	if err != nil {
+		log.Fatalf("-bitrate: %v", err)
+	}
+
+	res := bench.RunMirror(bench.MirrorConfig{
+		Addr:     *addr,
+		Mode:     *mode,
+		FPS:      *fps,
+		Bitrate:  rate / 8,
+		Seconds:  *seconds,
+		Keyframe: *keyframe,
+		Bulk:     *bulk,
+		Quiesce:  *quiesce,
+		Profile:  *profile,
+		Label:    *label,
+	})
+	enc := json.NewEncoder(os.Stdout)
+	if err := enc.Encode(res); err != nil {
+		fmt.Fprintf(os.Stderr, "emit: %v\n", err)
+	}
+	res.Summarize(os.Stderr)
 }

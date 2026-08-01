@@ -883,10 +883,13 @@ is told rather than left watching events disappear.
 
 ## 14. Capability: `mirror` (capID 6) — Phase 4
 
-**Provisional. ADR-4 (D-9) is open.** The framing below reflects the current
-leaning — stream-per-frame with `RESET_STREAM` — which D-24 made favourite by
-removing the scheduling argument for datagrams. It MUST be validated by the D-9
-spike before implementation, and this section is expected to change.
+**Settled by measurement (D-84).** The framing below — stream-per-frame with
+`RESET_STREAM` — was provisional until the ADR-4 spike ran. On a LAN the two
+candidates are indistinguishable; on a relayed path (80 ms RTT, 0.5% loss)
+streams are three times faster at the median and lose no frames, while
+datagrams lose roughly one frame in thirty because a keyframe is ~170 fragments
+and any one of them takes the whole frame with it. Raw numbers are in
+`oabench/netem/mirror-results-2026-08-01.jsonl`.
 
 ### 14.1 Session control
 
@@ -915,7 +918,7 @@ message MirrorStats   {                        // sink -> source, ~1 Hz
 bulk throttling for the duration of the session, and releases it on
 `MirrorStop`.
 
-### 14.2 Frame transport (provisional)
+### 14.2 Frame transport
 
 Each encoded frame is sent on its **own bidirectional stream**, opening with:
 
@@ -939,8 +942,16 @@ found no latency advantage for small messages, and datagrams are MTU-bound, so a
 200 KB keyframe becomes roughly 170 fragments requiring application-level
 fragmentation, reassembly and partial-loss detection — against a send queue only
 32 entries deep whose overflow is a silent discard. Streams provide
-fragmentation, reassembly and flow control for free. The open question the spike
-must answer is whether stream churn at 60 fps costs more than that saves.
+fragmentation, reassembly and flow control for free. The spike (D-84) measured
+the remaining question — whether stream churn at 60 fps costs more than that
+saves — and it does not: stream churn is invisible next to the frame loss
+datagrams take on a lossy path.
+
+`BitrateHint` is **load-bearing, not advisory**. The same spike found a source
+encoding 8 Mb/s onto a 100 Mb/s relayed path abandoning more than half its
+frames to `RESET_STREAM`, because a path's usable rate for *realtime* video is
+far below its throughput. A source that ignores the hint shows a viewer a
+fraction of the frames it believes it is sending.
 
 Screen capture on Android requires per-session user consent by OS policy
 (PRD K6); fully unattended mirroring of an Android target may be impossible and
