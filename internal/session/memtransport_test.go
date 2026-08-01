@@ -117,6 +117,9 @@ type memTransport struct {
 	incoming chan Stream // streams the peer opened towards us
 	outgoing chan Stream // the peer's incoming, so OpenStream can deliver
 
+	datagramsIn  chan []byte // datagrams the peer sent us
+	datagramsOut chan []byte // the peer's datagramsIn, so SendDatagram can deliver
+
 	path PathInfo
 
 	mu        sync.Mutex
@@ -128,9 +131,11 @@ type memTransport struct {
 func memTransportPair(aKey, bKey ed25519.PublicKey) (*memTransport, *memTransport) {
 	toA := make(chan Stream, 8)
 	toB := make(chan Stream, 8)
+	dgA := make(chan []byte, 64)
+	dgB := make(chan []byte, 64)
 	// A sees B's key as the peer key, and vice versa.
-	a := &memTransport{peerKey: bKey, incoming: toA, outgoing: toB, path: PathInfo{RTTMillis: 3, Class: "lan"}}
-	b := &memTransport{peerKey: aKey, incoming: toB, outgoing: toA, path: PathInfo{RTTMillis: 3, Class: "lan"}}
+	a := &memTransport{peerKey: bKey, incoming: toA, outgoing: toB, datagramsIn: dgA, datagramsOut: dgB, path: PathInfo{RTTMillis: 3, Class: "lan"}}
+	b := &memTransport{peerKey: aKey, incoming: toB, outgoing: toA, datagramsIn: dgB, datagramsOut: dgA, path: PathInfo{RTTMillis: 3, Class: "lan"}}
 	return a, b
 }
 
@@ -153,7 +158,31 @@ func (t *memTransport) AcceptStream(ctx context.Context) (Stream, error) {
 	}
 }
 
-func (t *memTransport) SendDatagram(b []byte) error { return nil }
+func (t *memTransport) SendDatagram(b []byte) error {
+	if t.datagramsOut == nil {
+		return nil
+	}
+	// Datagrams are droppable by definition, and a full queue is the one
+	// behaviour a test of drop-stale semantics needs to be able to produce.
+	select {
+	case t.datagramsOut <- append([]byte(nil), b...):
+	default:
+	}
+	return nil
+}
+
+func (t *memTransport) ReceiveDatagram(ctx context.Context) ([]byte, error) {
+	if t.datagramsIn == nil {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	select {
+	case b := <-t.datagramsIn:
+		return b, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func (t *memTransport) PeerPublicKey() (ed25519.PublicKey, error) {
 	if t.keyErr != nil {

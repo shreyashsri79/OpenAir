@@ -63,6 +63,24 @@ message SessionAnnounce {
   bool owned_level = 4;
 }
 
+// SessionAnnounceAck answers a SessionAnnounce.
+//
+// PROTOCOL.md §6.3 does not define one, and for a capability that runs on
+// streams none is needed: the announce and the work that follows it are ordered
+// by the control stream. `input` is not that -- its events are datagrams, which
+// have no ordering against a stream at all, so events sent immediately after an
+// announce routinely arrive before it and are discarded as unauthorised. The
+// initiator therefore waits for this before its first event (D-83).
+//
+// It also carries the refusal that would otherwise be silent: a device that
+// does not accept remote input says so here, rather than dropping every
+// datagram and leaving the sender to guess.
+message SessionAnnounceAck {
+  string session_id = 1;
+  bool accepted = 2;
+  string reason = 3;  // why not, shown to the person who asked
+}
+
 message SessionEnd {
   string session_id = 1;
   string reason = 2;

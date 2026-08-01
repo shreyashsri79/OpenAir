@@ -39,6 +39,8 @@ type transport interface {
 	// AcceptStream accepts the next bidirectional stream opened by the peer.
 	AcceptStream(ctx context.Context) (Stream, error)
 	SendDatagram(b []byte) error
+	// ReceiveDatagram blocks until the peer sends one, or ctx ends.
+	ReceiveDatagram(ctx context.Context) ([]byte, error)
 	// PeerPublicKey is the peer's TLS identity key, against which its claimed
 	// DeviceID is checked (§4).
 	PeerPublicKey() (ed25519.PublicKey, error)
@@ -67,6 +69,10 @@ func (t quicTransport) AcceptStream(ctx context.Context) (Stream, error) {
 }
 
 func (t quicTransport) SendDatagram(b []byte) error { return t.qc.SendDatagram(b) }
+
+func (t quicTransport) ReceiveDatagram(ctx context.Context) ([]byte, error) {
+	return t.qc.ReceiveDatagram(ctx)
+}
 
 func (t quicTransport) PeerPublicKey() (ed25519.PublicKey, error) {
 	certs := t.qc.ConnectionState().TLS.PeerCertificates
@@ -230,6 +236,7 @@ func newSession(ctx context.Context, tr transport, cfg Config) (Session, error) 
 	s.startQueues()
 	go s.readLoop()
 	go s.acceptLoop()
+	go s.datagramLoop()
 	return s, nil
 }
 
@@ -474,6 +481,53 @@ func (s *sess) readLoop() {
 			return
 		}
 		s.dispatch(env)
+	}
+}
+
+// datagramLoop delivers QUIC datagrams to whichever capability the leading
+// capID byte names (§13).
+//
+// Datagrams have no stream to identify them by and no envelope, which is the
+// point: an input event is a handful of bytes and framing it would cost more
+// than the payload. It also means there is no msgType to authorise against and
+// no room for an AuthProof, so what this checks is the peer's trust level,
+// re-read per datagram like every other message (D-74). Proof of an unlock
+// lives on the announce that precedes the events, not on the events (D-82).
+func (s *sess) datagramLoop() {
+	for {
+		b, err := s.tr.ReceiveDatagram(s.ctx)
+		if err != nil {
+			// A peer that never enables datagrams, or a session that ended.
+			// Neither is worth closing a live session over.
+			return
+		}
+		s.dispatchDatagram(b)
+	}
+}
+
+func (s *sess) dispatchDatagram(b []byte) {
+	if len(b) < 1 {
+		return
+	}
+	capID := b[0]
+	h, ok := s.handlers[capID]
+	if !ok {
+		// §3.1's rule, applied to datagrams: an unknown capability is ignored,
+		// not an error.
+		return
+	}
+	dh, ok := h.(DatagramHandler)
+	if !ok {
+		return
+	}
+	if _, negotiated := s.caps[capID]; !negotiated {
+		return
+	}
+	if !s.datagramAllowed(h, capID) {
+		return
+	}
+	if err := dh.ServeDatagram(s.ctx, s, b); err != nil {
+		s.log.Warn("capability datagram handler failed", "capID", capID, "err", err)
 	}
 }
 

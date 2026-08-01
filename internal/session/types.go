@@ -97,6 +97,18 @@ type Handler interface {
 	ServeStream(ctx context.Context, sess Session, st Stream, msgType uint16, payload []byte) error
 }
 
+// DatagramHandler is the optional half of Handler for capabilities that also
+// receive QUIC datagrams (§13). The payload includes the leading capID byte,
+// because the capability's own decoder is what defines the rest of the layout.
+//
+// It is separate from Handler so that the capabilities which will never see a
+// datagram -- every one but `input` and, if D-9 lands that way, `mirror` -- do
+// not have to declare a method to say so.
+type DatagramHandler interface {
+	Handler
+	ServeDatagram(ctx context.Context, sess Session, payload []byte) error
+}
+
 // Config is everything New needs that it cannot read off the QUIC connection.
 //
 // Peer carries the pinned record for an already-trusted peer. Its DeviceID is

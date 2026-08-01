@@ -48,6 +48,8 @@ func main() {
 		"rendezvous server as host:port@deviceid, so paired devices can find this one across networks")
 	relayAddr := flag.String("relay", "",
 		"relay server as host:port@deviceid, to stay reachable where no direct path works")
+	flag.BoolVar(&cfg.AcceptInput, "accept-input", false,
+		"let paired owned devices drive this machine's keyboard and pointer (M14, §13; off by default)")
 	shares := flag.String("share", "",
 		"directories paired Owned devices may browse and read, comma-separated (M10, §11)")
 	stunServers := flag.String("stun", "",

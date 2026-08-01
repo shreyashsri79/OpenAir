@@ -26,6 +26,7 @@ import (
 
 	"github.com/shreyashsri79/openair/internal/caps/clipboard"
 	"github.com/shreyashsri79/openair/internal/caps/files"
+	"github.com/shreyashsri79/openair/internal/caps/input"
 	"github.com/shreyashsri79/openair/internal/caps/notifications"
 	"github.com/shreyashsri79/openair/internal/caps/remotefs"
 	"github.com/shreyashsri79/openair/internal/conn"
@@ -110,6 +111,19 @@ type Config struct {
 	NotifyAllow []string
 	NotifyBlock []string
 
+	// AcceptInput lets a paired Owned device drive this one's keyboard and
+	// pointer (M14, §13). It is off by default and deliberately so: every other
+	// capability moves data, and this one hands over the machine. PRD R25 asks
+	// for remote control; it does not ask for it to be on because the daemon
+	// started.
+	AcceptInput bool
+
+	// InputInjector overrides the platform backend. It exists because the
+	// backend is a kernel device or a Windows API call, and a test cannot have
+	// either -- and because a shell embedding this daemon (the Android service,
+	// D-31) injects through its own platform rather than through /dev/uinput.
+	InputInjector input.Injector
+
 	// Shares are the directories this device offers for browsing (M10, §11).
 	// Empty shares nothing, which is what a daemon started without --share
 	// does: remotefs is registered either way, and answers every request with
@@ -151,6 +165,12 @@ type Daemon struct {
 	rfs    *remotefs.Capability
 	notes  *notifications.Capability
 
+	// input is M14's receiver. It exists on every daemon so that capID 5 is
+	// negotiated in both directions, and applies nothing unless this device was
+	// started with --accept-input: being driveable is not something to become
+	// by default (§13, PRD R25).
+	input *input.Capability
+
 	// clipState is M13's loop suppression, shared between the watcher and the
 	// receive path so that content applied from a peer is never sent back.
 	clipState *clipboard.SyncState
@@ -175,6 +195,24 @@ type Daemon struct {
 
 	// relay is the live relay connection and the listener riding it (M8).
 	relay relayState
+
+	// announcements are §6.3's live sessions, as this device sees them: what a
+	// peer said it was about to do, which is also what authorises the input
+	// datagrams that follow (D-82). outgoingKills is the other direction --
+	// sessions this device announced, so a SessionKill can stop them.
+	announcements map[string]*announced
+	outgoingKills map[string]chan struct{}
+	announceAcks  map[string]chan *openairv1.SessionAnnounceAck
+
+	// killedUntil is when a peer whose session a local user stopped may
+	// announce another one (§6.3, PRD R4).
+	killedUntil map[identity.DeviceID]time.Time
+
+	// controls are the control sessions this device holds over others (M14),
+	// and controlTargets remembers which device a target string resolved to so
+	// that a second command does not dial the same peer again.
+	controls       map[identity.DeviceID]*controlSession
+	controlTargets map[string]identity.DeviceID
 
 	// streams is the loopback HTTP server that lets a media player open a
 	// remote file (M11). Nil until a shell asks for a URL: a daemon nobody has
@@ -293,6 +331,36 @@ func New(cfg Config) (*Daemon, error) {
 		OnDismiss: d.onNotificationDismissed,
 		OnAction:  d.onNotificationAction,
 	})
+	// M14. The capability is registered whichever way --accept-input is set,
+	// because §4's negotiation is symmetric: a device that did not advertise
+	// capID 5 would find that the device it is *driving* discards its events,
+	// since that peer sees the capability as unnegotiated. Advertising means
+	// "this build speaks input"; whether this device will act on any is
+	// decided by inputAllowed, which needs both an announced session (D-82) and
+	// AcceptInput.
+	//
+	// The injector is opened only when this device agreed to be driven -- a
+	// machine that will never apply an event has no business creating a virtual
+	// keyboard in the kernel.
+	var injector input.Injector
+	if cfg.AcceptInput {
+		injector = cfg.InputInjector
+		if injector == nil {
+			var err error
+			injector, err = input.NewOSInjector()
+			if err != nil {
+				cfg.Logf("remote input is on but this device cannot inject: %v", err)
+				injector = nil
+			}
+		}
+	}
+	d.input = input.New(input.Config{
+		Injector: injector,
+		Allowed:  d.inputAllowed,
+		OnEvent:  d.onInputEvent,
+		Logf:     cfg.Logf,
+	})
+
 	d.clipState = clipboard.NewSyncState()
 
 	d.clip = clipboard.New(clipboard.Config{
@@ -441,6 +509,12 @@ func (d *Daemon) Close() error {
 		if streams != nil {
 			streams.close()
 		}
+		// Anything a peer was holding down is released before this process
+		// goes away, because a key held by a daemon that no longer exists is
+		// held until someone walks over to the machine (§13).
+		if d.input != nil {
+			_ = d.input.Close()
+		}
 		// A unix socket outlives its process unless removed. Leaving it behind
 		// makes the next start look like an already-running daemon.
 		if runtime.GOOS != "windows" {
@@ -470,13 +544,17 @@ func (d *Daemon) Close() error {
 // capID 0 is registered so a peer that revokes this device mid-session is
 // honoured while a transfer is still running (§6.1).
 func (d *Daemon) handlers() map[byte]session.Handler {
-	return map[byte]session.Handler{
+	h := map[byte]session.Handler{
 		0:                   &controlHandler{d: d},
 		files.CapID:         d.files,
 		clipboard.CapID:     d.clip,
 		remotefs.CapID:      d.rfs,
 		notifications.CapID: d.notes,
 	}
+	if d.input != nil {
+		h[input.CapID] = d.input
+	}
+	return h
 }
 
 func (d *Daemon) acceptSessions(ctx context.Context) { d.acceptFrom(ctx, d.ln) }

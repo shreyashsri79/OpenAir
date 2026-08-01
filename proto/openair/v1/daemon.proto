@@ -54,6 +54,8 @@ enum DaemonMessageType {
   DAEMON_MESSAGE_TYPE_DISMISS_RESPONSE = 30;
   DAEMON_MESSAGE_TYPE_STREAM_REQUEST = 31;
   DAEMON_MESSAGE_TYPE_STREAM_RESPONSE = 32;
+  DAEMON_MESSAGE_TYPE_INPUT_REQUEST = 33;
+  DAEMON_MESSAGE_TYPE_INPUT_RESPONSE = 34;
 }
 
 // DaemonStatusRequest asks what the daemon is and what it is doing.
@@ -199,6 +201,8 @@ enum DaemonEventKind {
   DAEMON_EVENT_KIND_AUTH_REFUSED = 14;     // an Owned request was turned away
   DAEMON_EVENT_KIND_NOTIFICATION = 15;         // a peer mirrored a notification (M12, §12)
   DAEMON_EVENT_KIND_NOTIFICATION_REMOVED = 16; // that notification is gone
+  DAEMON_EVENT_KIND_SESSION_ANNOUNCED = 17;    // §6.3's indicator: a peer is using this device
+  DAEMON_EVENT_KIND_SESSION_ENDED = 18;        // that session is over
 }
 
 // DaemonEvent is unsolicited: request_id is the request it belongs to when one
@@ -350,6 +354,47 @@ message DaemonFetchResponse {
   uint64 bytes_written = 2;
   string dest = 3;
   string error = 4;
+}
+
+// DaemonInputRequest drives another device's keyboard and pointer (M14, §13).
+//
+// The events themselves are datagrams with a fixed layout and never protobuf;
+// this is the local request that produces them, which is a different thing —
+// a shell says "type this", and the daemon turns it into key events, holds the
+// §6.3 session open and signs the Owned proof that authorises the lot (D-82).
+message DaemonInputRequest {
+  uint64 request_id = 1;
+  string device = 2;
+  repeated InputAction actions = 3;
+  bool stop = 4;  // end the control session instead of sending anything
+}
+
+// InputAction is one thing a shell asked for. Exactly one field is set.
+message InputAction {
+  string text = 1;              // type this, through a US layout (§13's layout note)
+  string key = 2;               // a named key: enter, f5, up, a
+  repeated string modifiers = 3; // held while `key` is tapped
+  InputMove move = 4;
+  string click = 5;             // left, right, middle, back, forward
+  InputScroll scroll = 6;
+}
+
+message InputMove {
+  int32 x = 1;
+  int32 y = 2;
+  bool absolute = 3;  // in the target's screen space rather than a delta
+}
+
+message InputScroll {
+  int32 dx = 1;
+  int32 dy = 2;
+  bool precise = 3;  // pixels rather than notches
+}
+
+message DaemonInputResponse {
+  uint64 request_id = 1;
+  uint32 sent = 2;  // events put on the wire
+  string error = 3;
 }
 
 // DaemonStreamRequest asks the daemon to serve a remote file over local HTTP

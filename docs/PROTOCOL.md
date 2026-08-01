@@ -372,6 +372,23 @@ MUST log announce, end, kill and every authentication event locally — auth eve
 originate on the initiator (D-18), so both ends keep a record and neither log is
 sufficient alone.
 
+```protobuf
+message SessionAnnounceAck {
+  string session_id = 1;
+  bool   accepted   = 2;
+  string reason     = 3;  // why not, shown to the person who asked
+}
+```
+
+An accessed device MUST answer a `SessionAnnounce` with `SessionAnnounceAck`,
+and an initiator whose announced capabilities include any that use **QUIC
+datagrams** (§13) MUST wait for it before sending one. This is not politeness:
+a datagram is not ordered against the control stream, so events sent
+immediately after an announce routinely arrive *before* it and are discarded as
+unauthorised. The acknowledgement is also where a refusal becomes legible — a
+device that will not accept remote input says so, rather than dropping every
+event in silence (D-83).
+
 **`SessionKill` is a courtesy, not the enforcement.** A local user killing a
 session takes effect by the accessed device refusing further operations and
 resetting the relevant streams. The message tells a well-behaved peer why; a
@@ -849,6 +866,18 @@ a safety release for any key held longer than 5 seconds with no traffic.
 
 Absolute coordinates are in the target's screen space, normalised by the
 `mirror` session's declared dimensions when one is active.
+
+**Authorisation.** `input` is Owned. A datagram has no room for an `AuthProof`
+and no `msgType` to bind one to, so the proof travels on the `SessionAnnounce`
+§6.3 already requires before any use of this capability, and events are applied
+only while that announcement stands and the peer is still recorded as Owned —
+re-read per event, so a revocation stops input at the next event rather than at
+the next announcement (D-82). Ending the announcement releases anything the
+peer was holding, as does the safety release above.
+
+Accepting remote input MUST be opt-in on the accessed device. This
+implementation refuses the announcement itself when it is off, so the initiator
+is told rather than left watching events disappear.
 
 ---
 

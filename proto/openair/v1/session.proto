@@ -33,6 +33,7 @@ enum ControlMessageType {
   // the path §18 offers and the one that exists here (D-66).
   CONTROL_MESSAGE_TYPE_PUNCH_REQUEST = 17;
   CONTROL_MESSAGE_TYPE_PUNCH_READY = 18;
+  CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE_ACK = 19;
 }
 
 // Hello is exchanged by both peers immediately after the QUIC handshake.

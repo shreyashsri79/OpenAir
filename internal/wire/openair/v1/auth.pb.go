@@ -403,6 +403,78 @@ func (x *SessionAnnounce) GetOwnedLevel() bool {
 	return false
 }
 
+// SessionAnnounceAck answers a SessionAnnounce.
+//
+// PROTOCOL.md §6.3 does not define one, and for a capability that runs on
+// streams none is needed: the announce and the work that follows it are ordered
+// by the control stream. `input` is not that -- its events are datagrams, which
+// have no ordering against a stream at all, so events sent immediately after an
+// announce routinely arrive before it and are discarded as unauthorised. The
+// initiator therefore waits for this before its first event (D-83).
+//
+// It also carries the refusal that would otherwise be silent: a device that
+// does not accept remote input says so here, rather than dropping every
+// datagram and leaving the sender to guess.
+type SessionAnnounceAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Accepted      bool                   `protobuf:"varint,2,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"` // why not, shown to the person who asked
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionAnnounceAck) Reset() {
+	*x = SessionAnnounceAck{}
+	mi := &file_openair_v1_auth_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionAnnounceAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionAnnounceAck) ProtoMessage() {}
+
+func (x *SessionAnnounceAck) ProtoReflect() protoreflect.Message {
+	mi := &file_openair_v1_auth_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionAnnounceAck.ProtoReflect.Descriptor instead.
+func (*SessionAnnounceAck) Descriptor() ([]byte, []int) {
+	return file_openair_v1_auth_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SessionAnnounceAck) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *SessionAnnounceAck) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+func (x *SessionAnnounceAck) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type SessionEnd struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -413,7 +485,7 @@ type SessionEnd struct {
 
 func (x *SessionEnd) Reset() {
 	*x = SessionEnd{}
-	mi := &file_openair_v1_auth_proto_msgTypes[6]
+	mi := &file_openair_v1_auth_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -425,7 +497,7 @@ func (x *SessionEnd) String() string {
 func (*SessionEnd) ProtoMessage() {}
 
 func (x *SessionEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_auth_proto_msgTypes[6]
+	mi := &file_openair_v1_auth_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -438,7 +510,7 @@ func (x *SessionEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionEnd.ProtoReflect.Descriptor instead.
 func (*SessionEnd) Descriptor() ([]byte, []int) {
-	return file_openair_v1_auth_proto_rawDescGZIP(), []int{6}
+	return file_openair_v1_auth_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SessionEnd) GetSessionId() string {
@@ -467,7 +539,7 @@ type SessionKill struct {
 
 func (x *SessionKill) Reset() {
 	*x = SessionKill{}
-	mi := &file_openair_v1_auth_proto_msgTypes[7]
+	mi := &file_openair_v1_auth_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -479,7 +551,7 @@ func (x *SessionKill) String() string {
 func (*SessionKill) ProtoMessage() {}
 
 func (x *SessionKill) ProtoReflect() protoreflect.Message {
-	mi := &file_openair_v1_auth_proto_msgTypes[7]
+	mi := &file_openair_v1_auth_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -492,7 +564,7 @@ func (x *SessionKill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionKill.ProtoReflect.Descriptor instead.
 func (*SessionKill) Descriptor() ([]byte, []int) {
-	return file_openair_v1_auth_proto_rawDescGZIP(), []int{7}
+	return file_openair_v1_auth_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SessionKill) GetSessionId() string {
@@ -535,7 +607,12 @@ const file_openair_v1_auth_proto_rawDesc = "" +
 	"\acap_ids\x18\x02 \x03(\x0e2\x18.openair.v1.CapabilityIdR\x06capIds\x12\x18\n" +
 	"\apurpose\x18\x03 \x01(\tR\apurpose\x12\x1f\n" +
 	"\vowned_level\x18\x04 \x01(\bR\n" +
-	"ownedLevel\"C\n" +
+	"ownedLevel\"g\n" +
+	"\x12SessionAnnounceAck\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
+	"\baccepted\x18\x02 \x01(\bR\baccepted\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"C\n" +
 	"\n" +
 	"SessionEnd\x12\x1d\n" +
 	"\n" +
@@ -557,28 +634,29 @@ func file_openair_v1_auth_proto_rawDescGZIP() []byte {
 	return file_openair_v1_auth_proto_rawDescData
 }
 
-var file_openair_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_openair_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_openair_v1_auth_proto_goTypes = []any{
-	(*AuthProof)(nil),       // 0: openair.v1.AuthProof
-	(*Revoke)(nil),          // 1: openair.v1.Revoke
-	(*CapabilityGrant)(nil), // 2: openair.v1.CapabilityGrant
-	(*ConsentRequest)(nil),  // 3: openair.v1.ConsentRequest
-	(*ConsentResponse)(nil), // 4: openair.v1.ConsentResponse
-	(*SessionAnnounce)(nil), // 5: openair.v1.SessionAnnounce
-	(*SessionEnd)(nil),      // 6: openair.v1.SessionEnd
-	(*SessionKill)(nil),     // 7: openair.v1.SessionKill
-	(TrustLevel)(0),         // 8: openair.v1.TrustLevel
-	(CapabilityId)(0),       // 9: openair.v1.CapabilityId
-	(ConsentScope)(0),       // 10: openair.v1.ConsentScope
+	(*AuthProof)(nil),          // 0: openair.v1.AuthProof
+	(*Revoke)(nil),             // 1: openair.v1.Revoke
+	(*CapabilityGrant)(nil),    // 2: openair.v1.CapabilityGrant
+	(*ConsentRequest)(nil),     // 3: openair.v1.ConsentRequest
+	(*ConsentResponse)(nil),    // 4: openair.v1.ConsentResponse
+	(*SessionAnnounce)(nil),    // 5: openair.v1.SessionAnnounce
+	(*SessionAnnounceAck)(nil), // 6: openair.v1.SessionAnnounceAck
+	(*SessionEnd)(nil),         // 7: openair.v1.SessionEnd
+	(*SessionKill)(nil),        // 8: openair.v1.SessionKill
+	(TrustLevel)(0),            // 9: openair.v1.TrustLevel
+	(CapabilityId)(0),          // 10: openair.v1.CapabilityId
+	(ConsentScope)(0),          // 11: openair.v1.ConsentScope
 }
 var file_openair_v1_auth_proto_depIdxs = []int32{
-	8,  // 0: openair.v1.Revoke.new_level:type_name -> openair.v1.TrustLevel
-	9,  // 1: openair.v1.CapabilityGrant.cap_ids:type_name -> openair.v1.CapabilityId
-	8,  // 2: openair.v1.CapabilityGrant.level:type_name -> openair.v1.TrustLevel
-	9,  // 3: openair.v1.ConsentRequest.cap_id:type_name -> openair.v1.CapabilityId
-	10, // 4: openair.v1.ConsentRequest.requested_scope:type_name -> openair.v1.ConsentScope
-	10, // 5: openair.v1.ConsentResponse.scope:type_name -> openair.v1.ConsentScope
-	9,  // 6: openair.v1.SessionAnnounce.cap_ids:type_name -> openair.v1.CapabilityId
+	9,  // 0: openair.v1.Revoke.new_level:type_name -> openair.v1.TrustLevel
+	10, // 1: openair.v1.CapabilityGrant.cap_ids:type_name -> openair.v1.CapabilityId
+	9,  // 2: openair.v1.CapabilityGrant.level:type_name -> openair.v1.TrustLevel
+	10, // 3: openair.v1.ConsentRequest.cap_id:type_name -> openair.v1.CapabilityId
+	11, // 4: openair.v1.ConsentRequest.requested_scope:type_name -> openair.v1.ConsentScope
+	11, // 5: openair.v1.ConsentResponse.scope:type_name -> openair.v1.ConsentScope
+	10, // 6: openair.v1.SessionAnnounce.cap_ids:type_name -> openair.v1.CapabilityId
 	7,  // [7:7] is the sub-list for method output_type
 	7,  // [7:7] is the sub-list for method input_type
 	7,  // [7:7] is the sub-list for extension type_name
@@ -598,7 +676,7 @@ func file_openair_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_openair_v1_auth_proto_rawDesc), len(file_openair_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

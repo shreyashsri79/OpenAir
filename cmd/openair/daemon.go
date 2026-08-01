@@ -105,6 +105,12 @@ func formatEvent(ev *openairv1.DaemonEvent) string {
 		return fmt.Sprintf("refused: %s", ev.GetText())
 	case openairv1.DaemonEventKind_DAEMON_EVENT_KIND_CLIPBOARD:
 		return fmt.Sprintf("clipboard from %s: %s", id, ev.GetText())
+	case openairv1.DaemonEventKind_DAEMON_EVENT_KIND_SESSION_ANNOUNCED:
+		// §6.3's visible indicator. It is deliberately loud: on this machine,
+		// something else is about to move the pointer or type.
+		return fmt.Sprintf("** %s -- stop it with `openair lock` or `openair trust`", ev.GetText())
+	case openairv1.DaemonEventKind_DAEMON_EVENT_KIND_SESSION_ENDED:
+		return fmt.Sprintf("session with %s %s", id, ev.GetText())
 	case openairv1.DaemonEventKind_DAEMON_EVENT_KIND_NOTIFICATION:
 		n := ev.GetNotification()
 		if n == nil {

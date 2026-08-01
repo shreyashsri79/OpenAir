@@ -68,6 +68,14 @@ func (h *controlHandler) Serve(ctx context.Context, sess session.Session, msgTyp
 		return h.d.onPunchRequest(ctx, sess, payload)
 	case openairv1.ControlMessageType_CONTROL_MESSAGE_TYPE_PUNCH_READY:
 		return h.d.onPunchReady(payload)
+	case openairv1.ControlMessageType_CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE:
+		return h.d.onSessionAnnounce(sess, payload)
+	case openairv1.ControlMessageType_CONTROL_MESSAGE_TYPE_SESSION_END:
+		return h.d.onSessionEnd(sess, payload)
+	case openairv1.ControlMessageType_CONTROL_MESSAGE_TYPE_SESSION_KILL:
+		return h.d.onSessionKill(sess, payload)
+	case openairv1.ControlMessageType_CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE_ACK:
+		return h.d.onSessionAnnounceAck(payload)
 	}
 	return h.d.pairs.Serve(ctx, sess, msgType, payload)
 }

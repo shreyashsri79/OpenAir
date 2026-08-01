@@ -218,6 +218,44 @@ func requiredLevel(h Handler) identity.TrustLevel {
 	return identity.LevelTrusted
 }
 
+// datagramAllowed is §6's gate as it applies to a datagram: the peer's current
+// trust level, and nothing else.
+//
+// There is no proof to consume and no msgType to bind one to (§13 gives a
+// datagram neither), so a capability that requires Owned is trusting the
+// announce that opened the exchange for the authentication half and this check
+// for the authorisation half (D-82). The level is re-read here for the reason
+// authorizeInbound re-reads it: a revocation has to land on a session that is
+// already running, and for input that is the difference between "stop" and
+// "stop after this stream of events finishes" (D-74).
+func (s *sess) datagramAllowed(h Handler, capID byte) bool {
+	s.mu.RLock()
+	peer := s.peer
+	haveRecord := s.haveRecord
+	s.mu.RUnlock()
+
+	if s.cfg.PeerLookup != nil && peer.DeviceID != "" {
+		if current, ok := s.cfg.PeerLookup(peer.DeviceID); ok {
+			peer.Level = current.Level
+			haveRecord = true
+		}
+	}
+
+	required := requiredLevel(h)
+	if required <= identity.LevelTrusted {
+		return true
+	}
+	if haveRecord && peer.Level < required {
+		s.authEvent(AuthEvent{
+			Peer: peer.DeviceID, CapID: capID,
+			Allowed: false, Code: CodeUnauthorised,
+			Reason: "peer is not recorded as Owned",
+		})
+		return false
+	}
+	return haveRecord
+}
+
 // authorizeInbound is §6's gate, applied to one message before it reaches its
 // capability. It returns whether the message may be served, and whether it
 // arrived with a verified Owned proof.

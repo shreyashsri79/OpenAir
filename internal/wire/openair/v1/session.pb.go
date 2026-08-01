@@ -48,8 +48,9 @@ const (
 	// because they are also the ones a rendezvous server would forward; these
 	// two values are how they travel over an existing session instead, which is
 	// the path §18 offers and the one that exists here (D-66).
-	ControlMessageType_CONTROL_MESSAGE_TYPE_PUNCH_REQUEST ControlMessageType = 17
-	ControlMessageType_CONTROL_MESSAGE_TYPE_PUNCH_READY   ControlMessageType = 18
+	ControlMessageType_CONTROL_MESSAGE_TYPE_PUNCH_REQUEST        ControlMessageType = 17
+	ControlMessageType_CONTROL_MESSAGE_TYPE_PUNCH_READY          ControlMessageType = 18
+	ControlMessageType_CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE_ACK ControlMessageType = 19
 )
 
 // Enum value maps for ControlMessageType.
@@ -74,27 +75,29 @@ var (
 		16: "CONTROL_MESSAGE_TYPE_PATH_INFO",
 		17: "CONTROL_MESSAGE_TYPE_PUNCH_REQUEST",
 		18: "CONTROL_MESSAGE_TYPE_PUNCH_READY",
+		19: "CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE_ACK",
 	}
 	ControlMessageType_value = map[string]int32{
-		"CONTROL_MESSAGE_TYPE_UNSPECIFIED":      0,
-		"CONTROL_MESSAGE_TYPE_HELLO":            1,
-		"CONTROL_MESSAGE_TYPE_PAIR_OFFER":       2,
-		"CONTROL_MESSAGE_TYPE_PAIR_REQUEST":     3,
-		"CONTROL_MESSAGE_TYPE_PAIR_RESPONSE":    4,
-		"CONTROL_MESSAGE_TYPE_PAIR_CONFIRM":     5,
-		"CONTROL_MESSAGE_TYPE_AUTH_PROOF":       6,
-		"CONTROL_MESSAGE_TYPE_REVOKE":           7,
-		"CONTROL_MESSAGE_TYPE_CAPABILITY_GRANT": 8,
-		"CONTROL_MESSAGE_TYPE_CONSENT_REQUEST":  9,
-		"CONTROL_MESSAGE_TYPE_CONSENT_RESPONSE": 10,
-		"CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE": 11,
-		"CONTROL_MESSAGE_TYPE_SESSION_END":      12,
-		"CONTROL_MESSAGE_TYPE_SESSION_KILL":     13,
-		"CONTROL_MESSAGE_TYPE_QUIESCE_REQUEST":  14,
-		"CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE":  15,
-		"CONTROL_MESSAGE_TYPE_PATH_INFO":        16,
-		"CONTROL_MESSAGE_TYPE_PUNCH_REQUEST":    17,
-		"CONTROL_MESSAGE_TYPE_PUNCH_READY":      18,
+		"CONTROL_MESSAGE_TYPE_UNSPECIFIED":          0,
+		"CONTROL_MESSAGE_TYPE_HELLO":                1,
+		"CONTROL_MESSAGE_TYPE_PAIR_OFFER":           2,
+		"CONTROL_MESSAGE_TYPE_PAIR_REQUEST":         3,
+		"CONTROL_MESSAGE_TYPE_PAIR_RESPONSE":        4,
+		"CONTROL_MESSAGE_TYPE_PAIR_CONFIRM":         5,
+		"CONTROL_MESSAGE_TYPE_AUTH_PROOF":           6,
+		"CONTROL_MESSAGE_TYPE_REVOKE":               7,
+		"CONTROL_MESSAGE_TYPE_CAPABILITY_GRANT":     8,
+		"CONTROL_MESSAGE_TYPE_CONSENT_REQUEST":      9,
+		"CONTROL_MESSAGE_TYPE_CONSENT_RESPONSE":     10,
+		"CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE":     11,
+		"CONTROL_MESSAGE_TYPE_SESSION_END":          12,
+		"CONTROL_MESSAGE_TYPE_SESSION_KILL":         13,
+		"CONTROL_MESSAGE_TYPE_QUIESCE_REQUEST":      14,
+		"CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE":      15,
+		"CONTROL_MESSAGE_TYPE_PATH_INFO":            16,
+		"CONTROL_MESSAGE_TYPE_PUNCH_REQUEST":        17,
+		"CONTROL_MESSAGE_TYPE_PUNCH_READY":          18,
+		"CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE_ACK": 19,
 	}
 )
 
@@ -281,7 +284,7 @@ const file_openair_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"Capability\x12(\n" +
 	"\x02id\x18\x01 \x01(\x0e2\x18.openair.v1.CapabilityIdR\x02id\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\rR\aversion*\xf9\x05\n" +
+	"\aversion\x18\x02 \x01(\rR\aversion*\xa8\x06\n" +
 	"\x12ControlMessageType\x12$\n" +
 	" CONTROL_MESSAGE_TYPE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aCONTROL_MESSAGE_TYPE_HELLO\x10\x01\x12#\n" +
@@ -302,7 +305,8 @@ const file_openair_v1_session_proto_rawDesc = "" +
 	"$CONTROL_MESSAGE_TYPE_QUIESCE_RELEASE\x10\x0f\x12\"\n" +
 	"\x1eCONTROL_MESSAGE_TYPE_PATH_INFO\x10\x10\x12&\n" +
 	"\"CONTROL_MESSAGE_TYPE_PUNCH_REQUEST\x10\x11\x12$\n" +
-	" CONTROL_MESSAGE_TYPE_PUNCH_READY\x10\x12BEZCgithub.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1b\x06proto3"
+	" CONTROL_MESSAGE_TYPE_PUNCH_READY\x10\x12\x12-\n" +
+	")CONTROL_MESSAGE_TYPE_SESSION_ANNOUNCE_ACK\x10\x13BEZCgithub.com/shreyashsri79/openair/internal/wire/openair/v1;openairv1b\x06proto3"
 
 var (
 	file_openair_v1_session_proto_rawDescOnce sync.Once

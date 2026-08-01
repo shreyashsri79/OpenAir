@@ -250,6 +250,36 @@ func (c *Client) StopStream(ctx context.Context, device, path string) error {
 	return nil
 }
 
+// Input drives another device's keyboard and pointer (M14, §13).
+//
+// The daemon holds the §6.3 session that authorises it and signs the Owned
+// proof, so a shell only says what it wants to happen.
+func (c *Client) Input(ctx context.Context, device string, actions []*openairv1.InputAction) (int, error) {
+	var resp openairv1.DaemonInputResponse
+	req := &openairv1.DaemonInputRequest{Device: device, Actions: actions}
+	if err := c.peer.Do(ctx, ipc.MsgInputRequest, req, &resp); err != nil {
+		return 0, err
+	}
+	if resp.GetError() != "" {
+		return int(resp.GetSent()), errors.New(resp.GetError())
+	}
+	return int(resp.GetSent()), nil
+}
+
+// StopInput ends the control session with a device (§6.3's SessionEnd), which
+// is what lowers the indicator on it.
+func (c *Client) StopInput(ctx context.Context, device string) error {
+	var resp openairv1.DaemonInputResponse
+	req := &openairv1.DaemonInputRequest{Device: device, Stop: true}
+	if err := c.peer.Do(ctx, ipc.MsgInputRequest, req, &resp); err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		return errors.New(resp.GetError())
+	}
+	return nil
+}
+
 // Notify mirrors a notification to a device, or to every connected device when
 // device is empty (M12, §12).
 //

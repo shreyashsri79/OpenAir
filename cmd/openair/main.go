@@ -50,6 +50,7 @@ usage:
   openair ls DEVICE [PATH] [-l] [--all] [--socket PATH]
   openair get DEVICE PATH [--out FILE] [--offset N] [--length N]
   openair stream DEVICE PATH [--open|--with PLAYER] [--stop]
+  openair input DEVICE [--text TEXT|--stdin] [--key KEY [--mods ctrl,alt]] [--click BUTTON]
   openair notify [DEVICE] --title TEXT [--body TEXT|--stdin] [--app ID]
   openair dismiss KEY [--device DEVICE] [--action ID [--reply TEXT]]
   openair protect [--keys DIR]
@@ -68,6 +69,7 @@ commands:
   clip      push this machine's clipboard, or the text you give, to a device
   ls        list what another device shares, without transferring anything
   get       copy a remote file, or a byte range of one, to this machine
+  input     type, click and scroll on another device you own
   notify    mirror a notification to a device, or to every connected one
   dismiss   clear a mirrored notification everywhere, or press one of its buttons
   protect   create this device's privilege key, sealed with a passphrase
@@ -130,6 +132,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runGet(args[1:], stdout)
 	case "stream":
 		return runStream(args[1:], stdout)
+	case "input":
+		return runInput(args[1:], stdin, stdout)
 	case "notify":
 		return runNotify(args[1:], stdin, stdout)
 	case "dismiss":
