@@ -4,3 +4,12 @@
 # Generated protobuf code is deliberately COMMITTED (D-28), so internal/wire
 # is not ignored: a plain `go build` must work on a fresh clone, and wire-format
 # changes belong in review diffs.
+
+# Build output from build_release.sh. The v1.0 artifacts already tracked under
+# release/ predate this rule; nothing new joins them.
+/release/bin/
+/release/gui/openair-gui
+/release/android/*-debug.apk
+
+# The gomobile-bound core, built by openair-android/build-aar.sh.
+/openair-android/app/libs/

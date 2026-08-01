@@ -1,0 +1,14 @@
+Website = "https://github.com/shreyashsri79/openair"
+
+[Details]
+Icon = "../../logo.png"
+Name = "OpenAir"
+ID = "com.openair.gui"
+Version = "2.0.0"
+Build = 1
+
+# Every widget touch from a daemon goroutine goes through fyne.Do (see the note
+# on the ui type in main.go). main.go declares the same thing through
+# app.SetMetadata, for the `go build` path where this file is not embedded.
+[Migrations]
+fyneDo = true

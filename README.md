@@ -43,7 +43,7 @@ Go 1.25 or newer, then:
 ```bash
 git clone https://github.com/shreyashsri79/openair
 cd openair
-go build ./cmd/...
+go build ./cmd/openair ./cmd/openaird ./cmd/openair-relay ./cmd/openair-rendezvous
 ```
 
 That produces four binaries:
@@ -58,6 +58,29 @@ That produces four binaries:
 Only the first two are needed on a LAN. Put them somewhere on your `PATH`.
 
 Supported: Linux, Windows, macOS, Android. Windows is a hard build gate in CI, so it does not rot.
+
+### The desktop window
+
+If you would rather click than type, there is a window. It is a front end onto the same daemon — it opens no connections of its own — so everything below works the same whether you drive it from the window or the terminal.
+
+```bash
+go build -tags x11 ./cmd/openair-gui     # on Linux; drop the tag if you have Wayland dev headers
+go build ./cmd/openair-gui               # macOS and Windows
+```
+
+It needs cgo and the usual OpenGL/X11 development packages. On Fedora that is `dnf install libX11-devel libXcursor-devel libXrandr-devel libXinerama-devel libXi-devel libXxf86vm-devel mesa-libGL-devel`; on Debian and Ubuntu, `apt install libgl1-mesa-dev xorg-dev`.
+
+Start `openaird`, then start the window. It lists devices, pairs, sends files (drop them anywhere on it), pushes the clipboard, browses another device's shares and streams from them. It also **approves inbound transfers**: with the window open you do not need `openair watch` running, and with nothing watching at all the daemon refuses inbound files by design.
+
+### The Android app
+
+```bash
+cd openair-android
+./build-aar.sh          # binds the Go core with gomobile; needs ANDROID_HOME and an NDK
+./gradlew assembleDebug # APK lands in app/build/outputs/apk/debug/
+```
+
+Install it with `adb install -r app/build/outputs/apk/debug/app-debug.apk`. `assembleRelease` needs a `keystore.properties` of your own; without one the release APK is unsigned and Android will not install it. `OPENAIR_AAR_TARGETS` picks the ABIs — the default is `android/arm64,android/amd64`, and arm64 alone roughly halves the APK.
 
 ---
 
