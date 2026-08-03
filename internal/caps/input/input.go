@@ -70,9 +70,9 @@ const (
 
 // Pointer buttons, in the order every platform numbers them.
 const (
-	ButtonLeft   byte = 0x01
-	ButtonRight  byte = 0x02
-	ButtonMiddle byte = 0x03
+	ButtonLeft    byte = 0x01
+	ButtonRight   byte = 0x02
+	ButtonMiddle  byte = 0x03
 	ButtonBack    byte = 0x04
 	ButtonForward byte = 0x05
 )

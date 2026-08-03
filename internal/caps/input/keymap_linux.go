@@ -60,7 +60,7 @@ var hidToLinux = map[uint16]uint16{
 	0x51: 108, // down
 	0x52: 103, // up
 
-	0x53: 69, // num lock
+	0x53: 69,                                         // num lock
 	0x54: 98, 0x55: 55, 0x56: 74, 0x57: 78, 0x58: 96, // keypad / * - + enter
 	0x59: 79, 0x5a: 80, 0x5b: 81, 0x5c: 75, 0x5d: 76, // keypad 1-5
 	0x5e: 77, 0x5f: 71, 0x60: 72, 0x61: 73, // keypad 6-9

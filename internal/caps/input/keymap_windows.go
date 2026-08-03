@@ -67,12 +67,12 @@ var hidToScan = map[uint16]struct {
 	0x51: {0x50, true},  // down
 	0x52: {0x48, true},  // up
 
-	0x53: {0x45, false}, // num lock
-	0x54: {0x35, true},  // keypad slash
-	0x55: {0x37, false}, // keypad asterisk
-	0x56: {0x4a, false}, // keypad minus
-	0x57: {0x4e, false}, // keypad plus
-	0x58: {0x1c, true},  // keypad enter
+	0x53: {0x45, false},                                           // num lock
+	0x54: {0x35, true},                                            // keypad slash
+	0x55: {0x37, false},                                           // keypad asterisk
+	0x56: {0x4a, false},                                           // keypad minus
+	0x57: {0x4e, false},                                           // keypad plus
+	0x58: {0x1c, true},                                            // keypad enter
 	0x59: {0x4f, false}, 0x5a: {0x50, false}, 0x5b: {0x51, false}, // keypad 1-3
 	0x5c: {0x4b, false}, 0x5d: {0x4c, false}, 0x5e: {0x4d, false}, // keypad 4-6
 	0x5f: {0x47, false}, 0x60: {0x48, false}, 0x61: {0x49, false}, // keypad 7-9

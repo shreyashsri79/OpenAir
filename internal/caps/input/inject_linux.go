@@ -94,9 +94,9 @@ type uinputSetup struct {
 		Product uint16
 		Version uint16
 	}
-	Name           [80]byte
-	FFEffectsMax   uint32
-	_              [4]byte
+	Name         [80]byte
+	FFEffectsMax uint32
+	_            [4]byte
 }
 
 // uinputInjector is an Injector backed by a virtual kernel device.
