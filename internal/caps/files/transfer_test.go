@@ -714,6 +714,43 @@ func TestRejectedOfferStopsTheSender(t *testing.T) {
 	}
 }
 
+// A receiver that refuses the peer closes the connection instead of answering
+// the offer (§10, conn.listener), so the sender's wait for TransferAccept must
+// end when the session does. Waiting only on the reply hangs until the caller's
+// context expires, and a mobile SendFiles has no deadline of its own.
+func TestSessionClosedWhileWaitingForAcceptStopsTheSender(t *testing.T) {
+	srcDir := t.TempDir()
+	srcs := writeSources(t, srcDir, map[string]int{"a.bin": 4096})
+
+	// No remote: the offer is sent and nothing ever replies to it.
+	c := New(Config{ChunkSize: 4096})
+	sess := &fakeSession{
+		t:     t,
+		peer:  identity.Peer{DeviceID: "peer0000000000aa", Level: identity.LevelOwned},
+		local: c,
+		inbox: make(chan sentMsg, 1),
+		done:  make(chan struct{}),
+	}
+
+	errc := make(chan error, 1)
+	go func() {
+		_, err := c.Send(context.Background(), sess, items(srcs))
+		errc <- err
+	}()
+
+	sess.awaitSent(t, MsgTransferOffer, time.Second)
+	sess.endSession()
+
+	select {
+	case err := <-errc:
+		if !errors.Is(err, ErrSessionClosed) {
+			t.Fatalf("err = %v, want ErrSessionClosed", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Send did not return after the session closed")
+	}
+}
+
 // §3.1: an unrecognised msgType is ignored and never fatal, which is what makes
 // mixed-version fleets viable.
 func TestUnknownMessageTypeIsIgnored(t *testing.T) {

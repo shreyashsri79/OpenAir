@@ -183,6 +183,11 @@ type fakeSession struct {
 	chunkWrite int
 	limit      int64
 
+	// done, when non-nil, is what Done reports; endSession closes it. A nil
+	// channel blocks forever, which is the right default for a fake session
+	// that outlives every transfer in its test.
+	done chan struct{}
+
 	mu     sync.Mutex
 	sent   []sentMsg
 	closed bool
@@ -200,8 +205,12 @@ func (s *fakeSession) Quiesce(context.Context, uint32, string) (func(), error) {
 }
 func (s *fakeSession) Close(uint16, string) error { return nil }
 
-// Done never fires: a fake session ends when the test does.
-func (s *fakeSession) Done() <-chan struct{} { return nil }
+// Done fires only for sessions built with endSession in mind; otherwise a fake
+// session ends when the test does.
+func (s *fakeSession) Done() <-chan struct{} { return s.done }
+
+// endSession models the peer closing the connection out from under a transfer.
+func (s *fakeSession) endSession() { close(s.done) }
 
 func (s *fakeSession) Send(ctx context.Context, capID byte, msgType uint16, msg proto.Message) error {
 	b, err := proto.Marshal(msg)

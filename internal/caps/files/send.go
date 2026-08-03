@@ -148,6 +148,8 @@ func (c *Capability) SendWithID(ctx context.Context, sess session.Session, id st
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-sess.Done():
+		return ErrSessionClosed
 	case <-st.cancelled:
 		return cancelErr(st.cancelMsg)
 	case <-st.accepted:
@@ -187,6 +189,8 @@ func (c *Capability) SendWithID(ctx context.Context, sess session.Session, id st
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-sess.Done():
+		return ErrSessionClosed
 	case <-st.cancelled:
 		return cancelErr(st.cancelMsg)
 	case <-st.completed:

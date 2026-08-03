@@ -66,6 +66,11 @@ var (
 	ErrUnknownTransfer = errors.New("files: unknown transfer")
 	// ErrVerification reports chunks that failed their manifest digest (§8.4).
 	ErrVerification = errors.New("files: chunk verification failed")
+	// ErrSessionClosed reports that the session ended while a transfer was
+	// waiting on the peer. A receiver that refuses the sender closes the
+	// connection instead of answering (§10), so every wait on a peer reply has
+	// to watch the session as well or it waits for a reply nobody will send.
+	ErrSessionClosed = errors.New("files: session closed before the peer replied")
 )
 
 // encodeEnvelope and decodeEnvelope indirect over the session layer's framing
